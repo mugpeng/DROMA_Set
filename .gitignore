@@ -1,0 +1,8 @@
+# ignore
+# file
+.Rhistory
+.Rproj.user
+.DS_Store
+# dir
+/data
+/archive

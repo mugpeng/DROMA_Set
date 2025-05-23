@@ -1,0 +1,37 @@
+Package: DROMASet
+Title: Drug Response and Omics Multi-project Analysis Set
+Version: 0.9.0
+Date: 2025-05-23
+Authors@R: 
+    person("Peng Yu", "Zhong", email = "yc47680@um.edu.mo", role = c("aut", "cre"))
+Description: DROMASet provides a comprehensive framework for managing and analyzing 
+    drug response and omics data across multiple projects. The package implements 
+    two main S4 classes: DromaSet for single-project analysis and MultiDromaSet 
+    for cross-project comparisons. It includes robust database connectivity, 
+    metadata management, sample overlap detection, and flexible data loading 
+    capabilities for various molecular profile types (mRNA, CNV, mutations, etc.) 
+    and treatment response data.
+License: MIT + file LICENSE
+URL: https://github.com/mugpeng/DROMASet
+BugReports: https://github.com/mugpeng/DROMASet/issues
+Depends: 
+    R (>= 4.0.0)
+Imports:
+    DBI (>= 1.1.0),
+    RSQLite (>= 2.2.0),
+    methods
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    BiocStyle
+VignetteBuilder: knitr
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2
+Collate:
+    'DromaSet-class.R'
+    'MultiDromaSet-class.R'
+    'DromaSet-database.R'
+    'MultiDromaSet-database.R'
+    'DROMA_SQLManager.R' 
