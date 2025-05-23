@@ -27,7 +27,7 @@ Suggests:
     BiocStyle
 VignetteBuilder: knitr
 Encoding: UTF-8
-LazyData: true
+LazyData: false
 RoxygenNote: 7.3.2
 Collate:
     'DromaSet-class.R'
