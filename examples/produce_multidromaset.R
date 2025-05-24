@@ -4,7 +4,7 @@
 # This example demonstrates how to use the MultiDromaSet class for
 # multi-project data access, sample overlap analysis, and cross-project comparisons
 
-library(DROMA_Set)
+library(DROMA.Set)
 
 # Connect to the database
 connectDROMADatabase("data/droma.sqlite")

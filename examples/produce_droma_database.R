@@ -4,7 +4,7 @@
 # This example demonstrates how to use the DROMA package with SQLite database
 # to efficiently load and query large omics datasets
 
-library(DROMA_Set)
+library(DROMA.Set)
 
 # ---------- Setup ----------
 # First-time setup: Create the database from .Rda files

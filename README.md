@@ -27,8 +27,8 @@ if (!requireNamespace("devtools", quietly = TRUE)) {
     install.packages("devtools")
 }
 
-# Install DROMASet
-devtools::install_github("mugpeng/DROMASet")
+# Install DROMA_Set
+devtools::install_github("mugpeng/DROMA_Set")
 ```
 
 ### Dependencies
@@ -38,14 +38,14 @@ The package requires the following R packages:
 - `RSQLite` (>= 2.2.0)
 - `methods`
 
-These will be automatically installed when you install DROMASet.
+These will be automatically installed when you install DROMA_Set.
 
 ## Quick Start
 
 ### 1. Load the Package
 
 ```r
-library(DROMASet)
+library(DROMA.Set)
 ```
 
 ### 2. Connect to Database
@@ -266,11 +266,11 @@ We welcome contributions! Please see our contributing guidelines:
 
 ## Citation
 
-If you use DROMASet in your research, please cite:
+If you use DROMA_Set in your research, please cite:
 
 ```
-Zhong, P.Y. (2024). DROMASet: Drug Response and Omics Multi-project Analysis Set. 
-R package version 0.9.0. https://github.com/mugpeng/DROMASet
+Zhong, P.Y. (2024). DROMA_Set: Drug Response and Omics Multi-project Analysis Set. 
+R package version 0.9.0. https://github.com/mugpeng/DROMA_Set
 ```
 
 ## License
@@ -280,8 +280,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 - 📧 **Email**: yc47680@um.edu.mo
-- 🐛 **Issues**: [GitHub Issues](https://github.com/mugpeng/DROMASet/issues)
-- 📖 **Documentation**: [Package Documentation](https://mugpeng.github.io/DROMASet/)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/mugpeng/DROMA_Set/issues)
+- 📖 **Documentation**: [Package Documentation](https://mugpeng.github.io/DROMA_Set/)
 
 ## Changelog
 
@@ -297,4 +297,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**DROMASet** - Empowering multi-project drug response and omics analysis 🧬💊
+**DROMA_Set** - Empowering multi-project drug response and omics analysis 🧬💊

@@ -4,7 +4,7 @@
 # This example demonstrates how to use the new project-oriented DromaSet class
 # for more efficient data access and organization
 
-library(DROMA_Set)
+library(DROMA.Set)
 
 # Connect to the database
 connectDROMADatabase("data/droma.sqlite")
