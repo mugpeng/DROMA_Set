@@ -164,10 +164,16 @@ cat("\n========== Cross-Project Data Loading ==========\n")
 
 # Load molecular profiles across projects for overlapping samples
 cat("Loading mRNA data across projects...\n")
+
+mRNA_multi2 <- loadMultiProjectMolecularProfiles(
+  multi_set1,
+  molecular_type = "mRNA",
+  data_type = "CellLine"
+)
+
 mRNA_multi <- tryCatch({
-  loadMultiProjectData(
+  loadMultiProjectMolecularProfiles(
     multi_set1,
-    data_type = "molecular",
     molecular_type = "mRNA",
     features = c("BRCA1", "BRCA2", "TP53", "EGFR", "MYC"),
     overlap_only = TRUE
@@ -220,12 +226,11 @@ if (!is.null(gCSI_all_mol)) {
 # Example 2: Load all molecular profiles across multiple projects
 cat("\nLoading all molecular profiles across projects (overlapping samples only)...\n")
 all_mol_multi <- tryCatch({
-  loadMultiProjectData(
+  loadMultiProjectMolecularProfiles(
     multi_set1,
-    data_type = "molecular",
     molecular_type = "all",
     features = c("BRCA1", "TP53"),  # Limit features for demonstration
-    overlap_only = TRUE
+    # overlap_only = TRUE
   )
 }, error = function(e) {
   cat("Could not load all molecular data across projects:", e$message, "\n")
@@ -251,7 +256,7 @@ if (!is.null(all_mol_multi)) {
 # Load treatment response data across projects
 cat("\nLoading drug response data across projects...\n")
 drug_multi <- tryCatch({
-  loadMultiProjectData(
+  loadMultiProjectTreatmentResponse(
     multi_set1,
     data_type = "treatment",
     drugs = c("Tamoxifen", "Cisplatin", "Paclitaxel"),
@@ -409,9 +414,8 @@ workflow_drugs <- c("Tamoxifen", "Cisplatin")
 
 cat("Loading data for analysis...\n")
 mol_data <- tryCatch({
-  loadMultiProjectData(
+  loadMultiProjectMolecularProfiles(
     multi_set1,
-    data_type = "molecular",
     molecular_type = "mRNA",
     features = workflow_features,
     overlap_only = TRUE
@@ -422,7 +426,7 @@ mol_data <- tryCatch({
 })
 
 drug_data <- tryCatch({
-  loadMultiProjectData(
+  loadMultiProjectTreatmentResponse(
     multi_set1,
     data_type = "treatment",
     drugs = workflow_drugs,

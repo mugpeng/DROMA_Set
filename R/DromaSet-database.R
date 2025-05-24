@@ -69,7 +69,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
             sample_ids <- c(sample_ids, continuous_samples)
           }
         }, error = function(e) {
-          warning("Error getting sample IDs from table '", table, "': ", e$message)
+          warning("Problem with getting sample IDs from table '", table, "': ", e$message)
         })
       }
 
@@ -89,7 +89,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
           }
           sample_metadata <- unique(sample_metadata)
         }, error = function(e) {
-          warning("Error loading sample metadata: ", e$message)
+          warning("Problem with loading sample metadata: ", e$message)
         })
       }
     }
@@ -107,7 +107,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
         treatment_metadata <- treatment_metadata[treatment_metadata$ProjectID %in% project_name,]
         treatment_metadata <- unique(treatment_metadata)
       }, error = function(e) {
-        warning("Error loading treatment metadata: ", e$message)
+        warning("Problem with loading treatment metadata: ", e$message)
       })
     }
   }
@@ -137,7 +137,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
         object <- loadTreatmentResponse(object)
         message("Loaded treatment response data for project '", project_name, "'")
       }, error = function(e) {
-        warning("Error loading treatment response data: ", e$message)
+        warning("Problem with loading treatment response data: ", e$message)
       })
     }
 
@@ -154,7 +154,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
           object <- loadMolecularProfiles(object, molecular_type = profile_type)
           message("Loaded '", profile_type, "' molecular profile data for project '", project_name, "'")
         }, error = function(e) {
-          warning("Error loading '", profile_type, "' molecular profile data: ", e$message)
+          warning("Problem with loading '", profile_type, "' molecular profile data: ", e$message)
         })
       }
     }

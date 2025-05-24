@@ -5,7 +5,7 @@
 
 ## Overview
 
-**DROMASet** is a comprehensive R package for managing and analyzing drug response and omics data across multiple projects. It provides a robust framework for handling complex multi-omics datasets with integrated drug sensitivity information, enabling seamless cross-project comparisons and analyses.
+**DROMA_Set** is a comprehensive R package for managing and analyzing drug response and omics data across multiple projects. It provides a robust framework for handling complex multi-omics datasets with integrated drug sensitivity information, enabling seamless cross-project comparisons and analyses.
 
 ### Key Features
 
@@ -82,11 +82,15 @@ gCSI <- loadMolecularProfiles(gCSI, molecular_type = "mRNA",
 # Load treatment response data
 gCSI <- loadTreatmentResponse(gCSI, drugs = c("Tamoxifen", "Cisplatin"))
 
-# Cross-project analysis
-mRNA_data <- loadMultiProjectData(multi_set, 
-                                 data_type = "molecular",
-                                 molecular_type = "mRNA",
-                                 overlap_only = TRUE)
+# Cross-project molecular analysis
+mRNA_data <- loadMultiProjectMolecularProfiles(multi_set, 
+                                              molecular_type = "mRNA",
+                                              overlap_only = TRUE)
+
+# Cross-project treatment response analysis
+drug_data <- loadMultiProjectTreatmentResponse(multi_set,
+                                              drugs = c("Tamoxifen", "Cisplatin"),
+                                              overlap_only = TRUE)
 ```
 
 ## Core Classes
@@ -124,15 +128,19 @@ multi_set <- createMultiDromaSetFromDatabase(c("gCSI", "CCLE"), "database.sqlite
 # Find overlapping samples
 overlap_info <- getOverlappingSamples(multi_set)
 
-# Load data across projects
-cross_data <- loadMultiProjectData(multi_set, 
-                                  data_type = "molecular",
-                                  molecular_type = "mRNA")
+# Load molecular data across projects
+mRNA_data <- loadMultiProjectMolecularProfiles(multi_set, 
+                                              molecular_type = "mRNA")
+
+# Load treatment response data across projects
+drug_data <- loadMultiProjectTreatmentResponse(multi_set,
+                                              drugs = c("Tamoxifen", "Cisplatin"))
 ```
 
 **Key Methods:**
 - `getOverlappingSamples()`: Identify samples present in multiple projects
-- `loadMultiProjectData()`: Load data across multiple projects
+- `loadMultiProjectMolecularProfiles()`: Load molecular data across multiple projects
+- `loadMultiProjectTreatmentResponse()`: Load treatment response data across multiple projects
 - `getDromaSet()`: Extract individual DromaSet from MultiDromaSet
 - `availableProjects()`: List available projects
 
@@ -145,9 +153,8 @@ cross_data <- loadMultiProjectData(multi_set,
 all_data <- loadMolecularProfiles(dataset, molecular_type = "all")
 
 # Cross-project loading of all molecular types
-all_cross_data <- loadMultiProjectData(multi_set,
-                                      data_type = "molecular", 
-                                      molecular_type = "all")
+all_cross_data <- loadMultiProjectMolecularProfiles(multi_set,
+                                                   molecular_type = "all")
 ```
 
 ### 2. Sample and Data Filtering
@@ -164,6 +171,13 @@ specific_data <- loadMolecularProfiles(dataset,
                                       molecular_type = "mRNA",
                                       features = c("BRCA1", "TP53"),
                                       samples = c("sample1", "sample2"))
+
+# Cross-project filtering by data type and tumor type
+filtered_cross_data <- loadMultiProjectMolecularProfiles(multi_set,
+                                                        molecular_type = "mRNA",
+                                                        data_type = "CellLine",
+                                                        tumor_type = "breast cancer",
+                                                        overlap_only = TRUE)
 ```
 
 ### 3. Database Management
@@ -193,17 +207,17 @@ overlaps <- getOverlappingSamples(multi_set)
 cat("Found", overlaps$overlap_count, "overlapping samples")
 
 # 3. Load molecular data for overlapping samples
-mRNA_data <- loadMultiProjectData(multi_set,
-                                 data_type = "molecular",
-                                 molecular_type = "mRNA",
-                                 features = c("BRCA1", "BRCA2"),
-                                 overlap_only = TRUE)
+mRNA_data <- loadMultiProjectMolecularProfiles(multi_set,
+                                              molecular_type = "mRNA",
+                                              features = c("BRCA1", "BRCA2"),
+                                              overlap_only = TRUE,
+                                              data_type = "CellLine")
 
-# 4. Load drug response data
-drug_data <- loadMultiProjectData(multi_set,
-                                 data_type = "treatment",
-                                 drugs = c("Tamoxifen", "Cisplatin"),
-                                 overlap_only = TRUE)
+# 4. Load drug response data for overlapping samples
+drug_data <- loadMultiProjectTreatmentResponse(multi_set,
+                                              drugs = c("Tamoxifen", "Cisplatin"),
+                                              overlap_only = TRUE,
+                                              data_type = "CellLine")
 
 # 5. Perform correlation analysis
 for (project in names(mRNA_data)) {
@@ -251,7 +265,7 @@ Comprehensive examples are provided in the `examples/` directory:
 1. **Use `overlap_only = TRUE`** when loading cross-project data to focus on comparable samples
 2. **Specify `features` parameter** to load only genes/drugs of interest
 3. **Use `return_data = TRUE`** when you only need the data without updating the object
-4. **Filter by `data_type` and `tumor_type`** to reduce data loading time
+4. **Filter by `data_type` and `tumor_type`** to reduce data loading time and focus on specific sample types
 5. **Load molecular profiles incrementally** rather than using `molecular_type = "all"` for large datasets
 
 ## Contributing
@@ -294,6 +308,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Sample overlap detection and analysis
 - Enhanced metadata management with ProjectID tracking
 - Support for loading all molecular profile types with `molecular_type = "all"`
+- Split cross-project data loading into specialized functions:
+  - `loadMultiProjectMolecularProfiles()` for molecular data
+  - `loadMultiProjectTreatmentResponse()` for treatment response data
+- Added `data_type` and `tumor_type` filtering parameters for enhanced sample selection
 
 ---
 

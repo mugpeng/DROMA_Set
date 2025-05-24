@@ -412,33 +412,25 @@ setMethod("getOverlappingSamples", "MultiDromaSet", function(object, projects = 
   return(result)
 })
 
-#' Load Data Across Multiple Projects
+#' Load Molecular Profiles Across Multiple Projects
 #'
-#' @description Loads molecular profiles or treatment response data from multiple projects,
+#' @description Loads molecular profiles from multiple projects,
 #' returning only data for overlapping samples
 #' @param object A MultiDromaSet object
-#' @param data_type Character, type of data to load ("molecular" or "treatment")
-#' @param molecular_type Character, for molecular data: the type to load (e.g., "mRNA", "cnv") or "all" to load all available types
+#' @param molecular_type Character, the type to load (e.g., "mRNA", "cnv") or "all" to load all available types
 #' @param features Character vector, specific features to load (optional)
-#' @param drugs Character vector, specific drugs to load (for treatment data, optional)
 #' @param projects Character vector, specific projects to load from (default: all projects)
-#' @param overlap_only Logical, whether to return only overlapping samples (default: TRUE)
-#' @return A list containing data matrices from each project
+#' @param overlap_only Logical, whether to return only overlapping samples (default: FALSE)
+#' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
+#' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
+#' @return A list containing molecular profile matrices from each project
 #' @export
-setGeneric("loadMultiProjectData", function(object, data_type, molecular_type = NULL, features = NULL, drugs = NULL, projects = NULL, overlap_only = TRUE)
-  standardGeneric("loadMultiProjectData"))
+setGeneric("loadMultiProjectMolecularProfiles", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all")
+  standardGeneric("loadMultiProjectMolecularProfiles"))
 
-#' @rdname loadMultiProjectData
+#' @rdname loadMultiProjectMolecularProfiles
 #' @export
-setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, molecular_type = NULL, features = NULL, drugs = NULL, projects = NULL, overlap_only = TRUE) {
-  if (!data_type %in% c("molecular", "treatment")) {
-    stop("data_type must be either 'molecular' or 'treatment'")
-  }
-
-  if (data_type == "molecular" && is.null(molecular_type)) {
-    stop("molecular_type must be specified when data_type is 'molecular'")
-  }
-
+setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all") {
   if (is.null(projects)) {
     projects <- object@name
   }
@@ -450,7 +442,7 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
   }
 
   # Handle "all" molecular_type option
-  if (data_type == "molecular" && molecular_type == "all") {
+  if (molecular_type == "all") {
     # Get all available molecular types across all projects
     all_mol_types <- character()
     for (proj in projects) {
@@ -470,13 +462,14 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
       message("Loading molecular profile type: ", mol_type)
 
       tryCatch({
-        mol_results <- loadMultiProjectData(
+        mol_results <- loadMultiProjectMolecularProfiles(
           object = object,
-          data_type = "molecular",
           molecular_type = mol_type,
           features = features,
           projects = projects,
-          overlap_only = overlap_only
+          overlap_only = overlap_only,
+          data_type = data_type,
+          tumor_type = tumor_type
         )
 
         # Store results with molecular type as top-level key
@@ -500,14 +493,11 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
     ds <- object@DromaSets[[proj]]
 
     tryCatch({
-      if (data_type == "molecular") {
-        data_list[[proj]] <- loadMolecularProfiles(ds, molecular_type = molecular_type,
-                                                  features = features, return_data = TRUE)
-      } else {
-        data_list[[proj]] <- loadTreatmentResponse(ds, drugs = drugs, return_data = TRUE)
-      }
+      data_list[[proj]] <- loadMolecularProfiles(ds, molecular_type = molecular_type,
+                                                features = features, return_data = TRUE,
+                                                data_type = data_type, tumor_type = tumor_type)
     }, error = function(e) {
-      warning("Problem loading data from project '", proj, "': ", e$message)
+      warning("Problem with loading molecular profiles from project '", proj, "': ", e$message)
       data_list[[proj]] <- NULL
     })
   }
@@ -516,7 +506,7 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
   data_list <- data_list[!sapply(data_list, is.null)]
 
   if (length(data_list) == 0) {
-    stop("No data could be loaded from any project")
+    stop("No molecular profile data could be loaded from any project")
   }
 
   # If overlap_only is TRUE, filter to overlapping samples
@@ -534,7 +524,7 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
     overlapping_samples <- Reduce(intersect, sample_lists)
 
     if (length(overlapping_samples) == 0) {
-      warning("No overlapping samples found between projects")
+      warning("No overlapping samples found between projects. Return all data.")
       return(data_list)
     }
 
@@ -549,7 +539,93 @@ setMethod("loadMultiProjectData", "MultiDromaSet", function(object, data_type, m
       return(x)
     })
 
-    message("Filtered data to ", length(overlapping_samples), " overlapping samples")
+    message("Filtered molecular profile data to ", length(overlapping_samples), " overlapping samples")
+  }
+
+  return(data_list)
+})
+
+#' Load Treatment Response Across Multiple Projects
+#'
+#' @description Loads treatment response data from multiple projects,
+#' returning only data for overlapping samples
+#' @param object A MultiDromaSet object
+#' @param drugs Character vector, specific drugs to load (optional)
+#' @param projects Character vector, specific projects to load from (default: all projects)
+#' @param overlap_only Logical, whether to return only overlapping samples (default: FALSE)
+#' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
+#' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
+#' @return A list containing treatment response matrices from each project
+#' @export
+setGeneric("loadMultiProjectTreatmentResponse", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all")
+  standardGeneric("loadMultiProjectTreatmentResponse"))
+
+#' @rdname loadMultiProjectTreatmentResponse
+#' @export
+setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object, drugs = NULL, projects = NULL, overlap_only = TRUE, data_type = "all", tumor_type = "all") {
+  if (is.null(projects)) {
+    projects <- object@name
+  }
+
+  # Validate project names
+  invalid_projects <- setdiff(projects, object@name)
+  if (length(invalid_projects) > 0) {
+    stop("Invalid project names: ", paste(invalid_projects, collapse = ", "))
+  }
+
+  # Load data from each project
+  data_list <- list()
+
+  for (proj in projects) {
+    ds <- object@DromaSets[[proj]]
+
+    tryCatch({
+      data_list[[proj]] <- loadTreatmentResponse(ds, drugs = drugs, return_data = TRUE,
+                                                data_type = data_type, tumor_type = tumor_type)
+    }, error = function(e) {
+      warning("Problem with loading treatment response from project '", proj, "': ", e$message)
+      data_list[[proj]] <- NULL
+    })
+  }
+
+  # Remove NULL entries
+  data_list <- data_list[!sapply(data_list, is.null)]
+
+  if (length(data_list) == 0) {
+    stop("No treatment response data could be loaded from any project")
+  }
+
+  # If overlap_only is TRUE, filter to overlapping samples
+  if (overlap_only && length(data_list) > 1) {
+    # Get sample names from each dataset
+    sample_lists <- lapply(data_list, function(x) {
+      if (is.matrix(x) || is.data.frame(x)) {
+        return(colnames(x))
+      } else {
+        return(character(0))
+      }
+    })
+
+    # Find overlapping samples
+    overlapping_samples <- Reduce(intersect, sample_lists)
+
+    if (length(overlapping_samples) == 0) {
+      warning("No overlapping samples found between projects. Return all data.")
+      return(data_list)
+    }
+
+    # Filter each dataset to overlapping samples
+    data_list <- lapply(data_list, function(x) {
+      if (is.matrix(x) || is.data.frame(x)) {
+        common_samples <- intersect(colnames(x), overlapping_samples)
+        if (length(common_samples) > 0) {
+          return(x[, common_samples, drop = FALSE])
+        }
+      }
+      return(x)
+    })
+
+    message("Filtered treatment response data to ", length(overlapping_samples), " overlapping samples")
   }
 
   return(data_list)

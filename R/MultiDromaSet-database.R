@@ -88,7 +88,7 @@ createMultiDromaSetFromDatabase <- function(project_names,
       )
       droma_sets[[project_names[i]]] <- ds
     }, error = function(e) {
-      warning("Error creating DromaSet for project '", project_names[i], "': ", e$message)
+      warning("Problem with creating DromaSet for project '", project_names[i], "': ", e$message)
     })
   }
 
