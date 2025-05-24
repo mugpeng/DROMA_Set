@@ -1,7 +1,7 @@
-# DROMASet: Drug Response and Omics Multi-project Analysis Set
+# DROMA_Set: Drug Response and Omics Multi-project Analysis Set
 
 [![R](https://img.shields.io/badge/R-%3E%3D4.0.0-blue.svg)](https://www.r-project.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: mpl-2-0](https://img.shields.io/badge/MPL-2.0-yellow.svg)](https://opensource.org/licenses/mpl-2-0)
 
 ## Overview
 
