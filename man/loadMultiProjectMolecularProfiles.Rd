@@ -10,7 +10,7 @@ loadMultiProjectMolecularProfiles(
   molecular_type,
   features = NULL,
   projects = NULL,
-  overlap_only = TRUE,
+  overlap_only = FLASE,
   data_type = "all",
   tumor_type = "all"
 )
@@ -20,7 +20,7 @@ loadMultiProjectMolecularProfiles(
   molecular_type,
   features = NULL,
   projects = NULL,
-  overlap_only = TRUE,
+  overlap_only = FLASE,
   data_type = "all",
   tumor_type = "all"
 )

@@ -85,12 +85,12 @@ gCSI <- loadTreatmentResponse(gCSI, drugs = c("Tamoxifen", "Cisplatin"))
 # Cross-project molecular analysis
 mRNA_data <- loadMultiProjectMolecularProfiles(multi_set, 
                                               molecular_type = "mRNA",
-                                              overlap_only = TRUE)
+                                              overlap_only = FLASE)
 
 # Cross-project treatment response analysis
 drug_data <- loadMultiProjectTreatmentResponse(multi_set,
                                               drugs = c("Tamoxifen", "Cisplatin"),
-                                              overlap_only = TRUE)
+                                              overlap_only = FLASE)
 ```
 
 ## Core Classes
@@ -177,7 +177,7 @@ filtered_cross_data <- loadMultiProjectMolecularProfiles(multi_set,
                                                         molecular_type = "mRNA",
                                                         data_type = "CellLine",
                                                         tumor_type = "breast cancer",
-                                                        overlap_only = TRUE)
+                                                        overlap_only = FLASE)
 ```
 
 ### 3. Database Management
@@ -210,13 +210,13 @@ cat("Found", overlaps$overlap_count, "overlapping samples")
 mRNA_data <- loadMultiProjectMolecularProfiles(multi_set,
                                               molecular_type = "mRNA",
                                               features = c("BRCA1", "BRCA2"),
-                                              overlap_only = TRUE,
+                                              overlap_only = FLASE,
                                               data_type = "CellLine")
 
 # 4. Load drug response data for overlapping samples
 drug_data <- loadMultiProjectTreatmentResponse(multi_set,
                                               drugs = c("Tamoxifen", "Cisplatin"),
-                                              overlap_only = TRUE,
+                                              overlap_only = FLASE,
                                               data_type = "CellLine")
 
 # 5. Perform correlation analysis
@@ -262,7 +262,7 @@ Comprehensive examples are provided in the `examples/` directory:
 
 ## Performance Tips
 
-1. **Use `overlap_only = TRUE`** when loading cross-project data to focus on comparable samples
+1. You may **Use `overlap_only = TRUE`** when loading cross-project data to focus on same samples
 2. **Specify `features` parameter** to load only genes/drugs of interest
 3. **Use `return_data = TRUE`** when you only need the data without updating the object
 4. **Filter by `data_type` and `tumor_type`** to reduce data loading time and focus on specific sample types

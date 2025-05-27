@@ -9,7 +9,7 @@ loadMultiProjectTreatmentResponse(
   object,
   drugs = NULL,
   projects = NULL,
-  overlap_only = TRUE,
+  overlap_only = FLASE,
   data_type = "all",
   tumor_type = "all"
 )
@@ -18,7 +18,7 @@ loadMultiProjectTreatmentResponse(
   object,
   drugs = NULL,
   projects = NULL,
-  overlap_only = TRUE,
+  overlap_only = FLASE,
   data_type = "all",
   tumor_type = "all"
 )

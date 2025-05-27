@@ -176,7 +176,7 @@ mRNA_multi <- tryCatch({
     multi_set1,
     molecular_type = "mRNA",
     features = c("BRCA1", "BRCA2", "TP53", "EGFR", "MYC"),
-    overlap_only = TRUE
+    overlap_only = FLASE
   )
 }, error = function(e) {
   cat("Could not load mRNA data:", e$message, "\n")
@@ -230,7 +230,7 @@ all_mol_multi <- tryCatch({
     multi_set1,
     molecular_type = "all",
     features = c("BRCA1", "TP53"),  # Limit features for demonstration
-    # overlap_only = TRUE
+    # overlap_only = FLASE
   )
 }, error = function(e) {
   cat("Could not load all molecular data across projects:", e$message, "\n")
@@ -260,7 +260,7 @@ drug_multi <- tryCatch({
     multi_set1,
     data_type = "treatment",
     drugs = c("Tamoxifen", "Cisplatin", "Paclitaxel"),
-    overlap_only = TRUE
+    overlap_only = FLASE
   )
 }, error = function(e) {
   cat("Could not load drug data:", e$message, "\n")
@@ -418,7 +418,7 @@ mol_data <- tryCatch({
     multi_set1,
     molecular_type = "mRNA",
     features = workflow_features,
-    overlap_only = TRUE
+    overlap_only = FLASE
   )
 }, error = function(e) {
   cat("Could not load molecular data for workflow\n")
@@ -430,7 +430,7 @@ drug_data <- tryCatch({
     multi_set1,
     data_type = "treatment",
     drugs = workflow_drugs,
-    overlap_only = TRUE
+    overlap_only = FLASE
   )
 }, error = function(e) {
   cat("Could not load drug data for workflow\n")
