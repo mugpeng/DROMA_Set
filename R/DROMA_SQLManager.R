@@ -461,7 +461,9 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
 #'
 #' @description Lists all available features (genes, drugs, etc.) for a specific project and data type
 #' @param project_name Character, the name of the project (e.g., "gCSI", "CCLE")
-#' @param data_type Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")
+#' @param data_sources Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")
+#' @param data_type Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
+#' @param tumor_type Character, filter by tumor type: "all" (default) or specific tumor type
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @param limit Integer, maximum number of features to return (default: NULL for all features)
 #' @param pattern Character, optional regex pattern to filter feature names
@@ -481,10 +483,17 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
 #' # List genes matching a pattern
 #' brca_genes <- listDROMAFeatures("gCSI", "mRNA", pattern = "^BRCA")
 #'
+#' # List genes for cell lines only
+#' cell_line_genes <- listDROMAFeatures("gCSI", "mRNA", data_type = "CellLine")
+#'
+#' # List genes for breast cancer samples only
+#' breast_genes <- listDROMAFeatures("gCSI", "mRNA", tumor_type = "breast cancer")
+#'
 #' # List first 100 features
 #' top_genes <- listDROMAFeatures("gCSI", "mRNA", limit = 100)
 #' }
-listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit = NULL, pattern = NULL) {
+listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tumor_type = "all",
+                             connection = NULL, limit = NULL, pattern = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
   }
@@ -498,7 +507,7 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
   }
 
   # Construct table name
-  table_name <- paste0(project_name, "_", data_type)
+  table_name <- paste0(project_name, "_", data_sources)
 
   # Check if table exists
   all_tables <- DBI::dbListTables(connection)
@@ -507,11 +516,48 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
          paste(grep(paste0("^", project_name, "_"), all_tables, value = TRUE), collapse = ", "))
   }
 
+  # Get filtered sample IDs if data_type or tumor_type filters are specified
+  filtered_samples <- NULL
+  if (data_type != "all" || tumor_type != "all") {
+    # Check if sample_anno table exists
+    if (!"sample_anno" %in% all_tables) {
+      warning("Sample annotation table 'sample_anno' not found. Ignoring data_type and tumor_type filters.")
+    } else {
+      # Construct query for sample filtering
+      sample_query <- "SELECT DISTINCT SampleID FROM sample_anno WHERE ProjectID = ?"
+      sample_params <- list(project_name)
+
+      if (data_type != "all") {
+        sample_query <- paste0(sample_query, " AND DataType = ?")
+        sample_params <- append(sample_params, data_type)
+      }
+
+      if (tumor_type != "all") {
+        sample_query <- paste0(sample_query, " AND TumorType = ?")
+        sample_params <- append(sample_params, tumor_type)
+      }
+
+      # Execute the query
+      sample_result <- DBI::dbGetQuery(connection, sample_query, params = sample_params)
+      filtered_samples <- sample_result$SampleID
+
+      if (length(filtered_samples) == 0) {
+        filter_parts <- c()
+        if(data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
+        if(tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
+        filter_desc <- paste0(" with ", paste(filter_parts, collapse = " and "))
+
+        message("No samples found for project '", project_name, "'", filter_desc)
+        return(character(0))
+      }
+    }
+  }
+
   # Determine the column name based on data type
-  if (data_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+  if (data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
     # For continuous data, features are in feature_id column
     feature_column <- "feature_id"
-  } else if (data_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+  } else if (data_sources %in% c("mutation_gene", "mutation_site", "fusion")) {
     # For discrete data, features are in genes column
     feature_column <- "genes"
   } else {
@@ -525,14 +571,35 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
     } else if ("genes" %in% columns_info$name) {
       feature_column <- "genes"
     } else {
-      stop("Cannot determine feature column for data type '", data_type,
+      stop("Cannot determine feature column for data type '", data_sources,
            "'. Available columns: ", paste(columns_info$name, collapse = ", "))
     }
   }
 
-  # Construct query to get distinct features
-  query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
-                  " WHERE ", feature_column, " IS NOT NULL")
+  # For continuous data types, we need to check which features have data for the filtered samples
+  if (!is.null(filtered_samples) && data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+    # Get column names from the table to see which samples have data
+    columns_query <- paste0("PRAGMA table_info(", table_name, ")")
+    columns_info <- DBI::dbGetQuery(connection, columns_query)
+    available_columns <- columns_info$name[columns_info$name != "feature_id"]
+
+    # Find intersection of filtered samples and available columns
+    common_samples <- intersect(filtered_samples, available_columns)
+
+    if (length(common_samples) == 0) {
+      message("No data available for the specified sample filters in ", table_name)
+      return(character(0))
+    }
+
+    # For continuous data, we'll get all features since sample filtering is conceptual
+    # (all features exist, but only some samples would be used in analysis)
+    query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
+                    " WHERE ", feature_column, " IS NOT NULL")
+  } else {
+    # Construct query to get distinct features
+    query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
+                    " WHERE ", feature_column, " IS NOT NULL")
+  }
 
   # Add pattern filter if specified
   if (!is.null(pattern)) {
@@ -577,11 +644,14 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
     features <- result[[feature_column]]
 
     if (length(features) == 0) {
-      if (!is.null(pattern)) {
-        message("No features found matching pattern '", pattern, "' in ", table_name)
-      } else {
-        message("No features found in ", table_name)
-      }
+      filter_parts <- c()
+      if (!is.null(pattern)) filter_parts <- c(filter_parts, paste0("pattern='", pattern, "'"))
+      if (data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
+      if (tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
+
+      filter_desc <- if(length(filter_parts) > 0) paste0(" with ", paste(filter_parts, collapse = " and ")) else ""
+
+      message("No features found in ", table_name, filter_desc)
       return(character(0))
     }
 
@@ -591,14 +661,24 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
     total_result <- DBI::dbGetQuery(connection, total_query)
     total_features <- total_result$total
 
-    if (!is.null(pattern)) {
-      message("Found ", length(features), " features matching pattern '", pattern,
-              "' out of ", total_features, " total features in ", table_name)
-    } else if (!is.null(limit)) {
+    filter_desc <- ""
+    filters <- c()
+    if (!is.null(pattern)) filters <- c(filters, paste0("pattern='", pattern, "'"))
+    if (data_type != "all") filters <- c(filters, paste0("data_type='", data_type, "'"))
+    if (tumor_type != "all") filters <- c(filters, paste0("tumor_type='", tumor_type, "'"))
+
+    if (length(filters) > 0) {
+      filter_desc <- paste0(" (filtered by ", paste(filters, collapse = " and "), ")")
+    }
+
+    if (!is.null(limit)) {
       message("Showing first ", length(features), " features out of ", total_features,
-              " total features in ", table_name)
+              " total features in ", table_name, filter_desc)
+    } else if (!is.null(pattern)) {
+      message("Found ", length(features), " features matching pattern '", pattern,
+              "' out of ", total_features, " total features in ", table_name, filter_desc)
     } else {
-      message("Found ", length(features), " features in ", table_name)
+      message("Found ", length(features), " features in ", table_name, filter_desc)
     }
 
     return(features)
@@ -614,8 +694,10 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
 #' @param project_name Character, the name of the project (e.g., "gCSI", "CCLE")
 #' @param data_type Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Character, filter by tumor type: "all" (default) or specific tumor type
+#' @param data_sources Character, filter by data sources: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @param limit Integer, maximum number of samples to return (default: NULL for all samples)
+#' @param pattern Character, optional regex pattern to filter sample names
 #' @return A character vector of available sample IDs
 #' @export
 #' @examples
@@ -632,11 +714,17 @@ listDROMAFeatures <- function(project_name, data_type, connection = NULL, limit 
 #' # List only breast cancer samples
 #' breast_samples <- listDROMASamples("gCSI", tumor_type = "breast cancer")
 #'
+#' # List samples with mRNA data
+#' mrna_samples <- listDROMASamples("gCSI", data_sources = "mRNA")
+#'
 #' # List first 50 samples
 #' top_samples <- listDROMASamples("gCSI", limit = 50)
+#'
+#' # List samples matching a pattern
+#' mcf_samples <- listDROMASamples("gCSI", pattern = "^MCF")
 #' }
-listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all",
-                            connection = NULL, limit = NULL) {
+listDROMASamples <- function(project_name, data_sources = "all", data_type = "all", tumor_type = "all",
+                            connection = NULL, limit = NULL, pattern = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
   }
@@ -655,6 +743,51 @@ listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all"
     stop("Sample annotation table 'sample_anno' not found in database")
   }
 
+  # Get samples with data_sources filter if specified
+  filtered_samples_by_data <- NULL
+  if (data_sources != "all") {
+    # Construct table name for the data source
+    data_table_name <- paste0(project_name, "_", data_sources)
+
+    # Check if the data source table exists
+    if (!data_table_name %in% all_tables) {
+      stop("Data source table '", data_table_name, "' not found. Available tables: ",
+           paste(grep(paste0("^", project_name, "_"), all_tables, value = TRUE), collapse = ", "))
+    }
+
+    # Get samples that have data in this data source
+    if (data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+      # For continuous data, get column names (excluding feature_id)
+      columns_query <- paste0("PRAGMA table_info(", data_table_name, ")")
+      columns_info <- DBI::dbGetQuery(connection, columns_query)
+      filtered_samples_by_data <- columns_info$name[columns_info$name != "feature_id"]
+    } else if (data_sources %in% c("mutation_gene", "mutation_site", "fusion")) {
+      # For discrete data, get unique values from cells column
+      discrete_query <- paste0("SELECT DISTINCT cells FROM ", data_table_name, " WHERE cells IS NOT NULL")
+      discrete_result <- DBI::dbGetQuery(connection, discrete_query)
+      filtered_samples_by_data <- discrete_result$cells
+    } else {
+      # Try to detect automatically
+      columns_query <- paste0("PRAGMA table_info(", data_table_name, ")")
+      columns_info <- DBI::dbGetQuery(connection, columns_query)
+
+      if ("cells" %in% columns_info$name) {
+        # Discrete data
+        discrete_query <- paste0("SELECT DISTINCT cells FROM ", data_table_name, " WHERE cells IS NOT NULL")
+        discrete_result <- DBI::dbGetQuery(connection, discrete_query)
+        filtered_samples_by_data <- discrete_result$cells
+      } else {
+        # Continuous data
+        filtered_samples_by_data <- columns_info$name[columns_info$name != "feature_id"]
+      }
+    }
+
+    if (length(filtered_samples_by_data) == 0) {
+      message("No samples found with data in '", data_sources, "' for project '", project_name, "'")
+      return(character(0))
+    }
+  }
+
   # Construct query
   query <- "SELECT DISTINCT SampleID FROM sample_anno WHERE ProjectID = ?"
   params <- list(project_name)
@@ -671,6 +804,48 @@ listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all"
     params <- append(params, tumor_type)
   }
 
+  # Add data sources filter by restricting to samples with data
+  if (!is.null(filtered_samples_by_data)) {
+    if (length(filtered_samples_by_data) > 0) {
+      placeholders <- paste(rep("?", length(filtered_samples_by_data)), collapse = ",")
+      query <- paste0(query, " AND SampleID IN (", placeholders, ")")
+      params <- append(params, as.list(filtered_samples_by_data))
+    } else {
+      # No samples with data in this data source
+      return(character(0))
+    }
+  }
+
+  # Add pattern filter if specified
+  if (!is.null(pattern)) {
+    # Convert regex pattern to SQL LIKE pattern for basic matching
+    # For simple patterns like "^MCF", convert to "MCF%"
+    # For patterns with *, convert to %
+    like_pattern <- pattern
+
+    # Handle common regex patterns
+    if (grepl("^\\^", pattern)) {
+      # Pattern starts with ^, remove ^ and add % at end
+      like_pattern <- paste0(sub("^\\^", "", pattern), "%")
+    } else if (grepl("\\$$", pattern)) {
+      # Pattern ends with $, remove $ and add % at start
+      like_pattern <- paste0("%", sub("\\$$", "", pattern))
+    } else if (grepl("^\\^.*\\$$", pattern)) {
+      # Pattern has both ^ and $, remove both (exact match)
+      like_pattern <- gsub("^\\^|\\$$", "", pattern)
+    } else {
+      # Default: add % on both sides for contains matching
+      like_pattern <- paste0("%", pattern, "%")
+    }
+
+    # Replace common regex characters with SQL LIKE equivalents
+    like_pattern <- gsub("\\*", "%", like_pattern)
+    like_pattern <- gsub("\\.", "_", like_pattern)
+
+    query <- paste0(query, " AND SampleID LIKE ?")
+    params <- append(params, like_pattern)
+  }
+
   # Add ordering
   query <- paste0(query, " ORDER BY SampleID")
 
@@ -685,9 +860,15 @@ listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all"
     samples <- result$SampleID
 
     if (length(samples) == 0) {
-      message("No samples found for project '", project_name, "'",
-              if(data_type != "all") paste0(" with data_type '", data_type, "'") else "",
-              if(tumor_type != "all") paste0(" with tumor_type '", tumor_type, "'") else "")
+      filter_parts <- c()
+      if(data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
+      if(tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
+      if(data_sources != "all") filter_parts <- c(filter_parts, paste0("data_sources='", data_sources, "'"))
+      if(!is.null(pattern)) filter_parts <- c(filter_parts, paste0("pattern='", pattern, "'"))
+
+      filter_desc <- if(length(filter_parts) > 0) paste0(" with ", paste(filter_parts, collapse = " and ")) else ""
+
+      message("No samples found for project '", project_name, "'", filter_desc)
       return(character(0))
     }
 
@@ -697,10 +878,13 @@ listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all"
     total_samples <- total_result$total
 
     filter_desc <- ""
-    if (data_type != "all" || tumor_type != "all") {
-      filters <- c()
-      if (data_type != "all") filters <- c(filters, paste0("data_type='", data_type, "'"))
-      if (tumor_type != "all") filters <- c(filters, paste0("tumor_type='", tumor_type, "'"))
+    filters <- c()
+    if (data_type != "all") filters <- c(filters, paste0("data_type='", data_type, "'"))
+    if (tumor_type != "all") filters <- c(filters, paste0("tumor_type='", tumor_type, "'"))
+    if (data_sources != "all") filters <- c(filters, paste0("data_sources='", data_sources, "'"))
+    if (!is.null(pattern)) filters <- c(filters, paste0("pattern='", pattern, "'"))
+
+    if (length(filters) > 0) {
       filter_desc <- paste0(" (filtered by ", paste(filters, collapse = " and "), ")")
     }
 
@@ -708,7 +892,12 @@ listDROMASamples <- function(project_name, data_type = "all", tumor_type = "all"
       message("Showing first ", length(samples), " samples out of ", total_samples,
               " total samples for project '", project_name, "'", filter_desc)
     } else {
-      message("Found ", length(samples), " samples for project '", project_name, "'", filter_desc)
+      if (!is.null(pattern) || data_sources != "all") {
+        message("Found ", length(samples), " samples out of ", total_samples,
+                " total samples for project '", project_name, "'", filter_desc)
+      } else {
+        message("Found ", length(samples), " samples for project '", project_name, "'", filter_desc)
+      }
     }
 
     return(samples)
