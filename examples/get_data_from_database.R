@@ -10,10 +10,10 @@ library(DROMA.Set)
 # First-time setup: Create the database from .Rda files
 # This step only needs to be done once
 cat("Creating DROMA database (this may take a few minutes)...\n")
-createDROMADatabase(db_path = "sql_db/droma.sqlite", rda_dir = "data/Rda")
+# createDROMADatabase(db_path = "sql_db/droma.sqlite", rda_dir = "data/Rda")
 
 # Connect to the database
-db_conn <- connectDROMADatabase()
+db_conn <- connectDROMADatabase(db_path = "data/droma.sqlite")
 
 # ---------- List Available Tables ----------
 

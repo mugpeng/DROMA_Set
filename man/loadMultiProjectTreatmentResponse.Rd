@@ -9,7 +9,7 @@ loadMultiProjectTreatmentResponse(
   object,
   drugs = NULL,
   projects = NULL,
-  overlap_only = FLASE,
+  overlap_only = FALSE,
   data_type = "all",
   tumor_type = "all"
 )
@@ -30,7 +30,7 @@ loadMultiProjectTreatmentResponse(
 
 \item{projects}{Character vector, specific projects to load from (default: all projects)}
 
-\item{overlap_only}{Logical, whether to return only overlapping samples (default: TRUE)}
+\item{overlap_only}{Logical, whether to return only overlapping samples (default: FALSE)}
 
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"}
 

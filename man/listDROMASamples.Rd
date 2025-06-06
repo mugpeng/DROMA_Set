@@ -6,14 +6,18 @@
 \usage{
 listDROMASamples(
   project_name,
+  data_sources = "all",
   data_type = "all",
   tumor_type = "all",
   connection = NULL,
-  limit = NULL
+  limit = NULL,
+  pattern = NULL
 )
 }
 \arguments{
 \item{project_name}{Character, the name of the project (e.g., "gCSI", "CCLE")}
+
+\item{data_sources}{Character, filter by data sources: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")}
 
 \item{data_type}{Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
 
@@ -22,6 +26,8 @@ listDROMASamples(
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 
 \item{limit}{Integer, maximum number of samples to return (default: NULL for all samples)}
+
+\item{pattern}{Character, optional regex pattern to filter sample names}
 }
 \value{
 A character vector of available sample IDs
@@ -43,7 +49,13 @@ cell_lines <- listDROMASamples("gCSI", data_type = "CellLine")
 # List only breast cancer samples
 breast_samples <- listDROMASamples("gCSI", tumor_type = "breast cancer")
 
+# List samples with mRNA data
+mrna_samples <- listDROMASamples("gCSI", data_sources = "mRNA")
+
 # List first 50 samples
 top_samples <- listDROMASamples("gCSI", limit = 50)
+
+# List samples matching a pattern
+mcf_samples <- listDROMASamples("gCSI", pattern = "^MCF")
 }
 }
