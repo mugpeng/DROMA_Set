@@ -352,8 +352,10 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
     # If metadata table doesn't exist, create basic info
     result <- data.frame(
       table_name = tables,
-      row_count = sapply(tables, function(t)
+      feature_count = sapply(tables, function(t)
         DBI::dbGetQuery(connection, paste0("SELECT COUNT(*) FROM ", t))[1,1]),
+      sample_count = sapply(tables, function(t)
+        ncol(DBI::dbGetQuery(connection, paste0("SELECT * FROM ", t, " LIMIT 1")))),
       stringsAsFactors = FALSE
     )
   }
@@ -411,7 +413,7 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
   # Extract project names from table prefixes
   project_names <- unique(sapply(tables, function(t) {
     parts <- strsplit(t, "_")[[1]]
-    if (length(parts) >= 2 && !t %in% c("sample_anno", "drug_anno", "droma_metadata", "search_vectors")) {
+    if (length(parts) >= 2 && !t %in% c("sample_anno", "drug_anno")) {
       return(parts[1])
     } else {
       return(NA)
@@ -1100,5 +1102,225 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
   }, error = function(e) {
     stop("Error querying ", anno_type, " annotations: ", e$message)
   })
+}
+
+#' Update DROMA Projects Metadata
+#'
+#' @description Updates or adds project metadata to the projects table in the DROMA database.
+#' This function automatically detects project information from existing tables and updates
+#' the projects table accordingly. If a project already exists, it updates the metadata;
+#' if it's new, it adds a new entry.
+#'
+#' @param project_name Character, the name of the project to update (e.g., "gCSI", "CCLE").
+#'   If NULL, updates all projects found in the database.
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @param create_table Logical, whether to create the projects table if it doesn't exist (default: TRUE)
+#' @return Invisibly returns TRUE if successful
+#' @export
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # Add some data tables first
+#' updateDROMADatabase(expr_data, "gCSI_mRNA", overwrite = TRUE)
+#' updateDROMADatabase(cnv_data, "gCSI_cnv", overwrite = TRUE)
+#'
+#' # Update project metadata for gCSI
+#' updateDROMAProjects("gCSI")
+#'
+#' # Update all projects in the database
+#' updateDROMAProjects()
+#' }
+updateDROMAProjects <- function(project_name = NULL, connection = NULL, create_table = TRUE) {
+  if (!requireNamespace("DBI", quietly = TRUE) ||
+      !requireNamespace("RSQLite", quietly = TRUE)) {
+    stop("Packages 'DBI' and 'RSQLite' are required. Please install them with install.packages(c('DBI', 'RSQLite'))")
+  }
+
+  # Get connection from global environment if not provided
+  if (is.null(connection)) {
+    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
+      stop("No database connection found. Connect first with connectDROMADatabase()")
+    }
+    connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  # Get all tables in the database
+  all_tables <- DBI::dbListTables(connection)
+
+  # Extract project names from table names
+  if (is.null(project_name)) {
+    # Get all project names from tables
+    project_names <- unique(sapply(all_tables, function(t) {
+      parts <- strsplit(t, "_")[[1]]
+      if (length(parts) >= 2 && !t %in% c("sample_anno", "drug_anno", "search_vectors", "projects", "droma_metadata")) {
+        return(parts[1])
+      } else {
+        return(NA)
+      }
+    }))
+    project_names <- project_names[!is.na(project_names)]
+  } else {
+    # Use specified project name
+    project_names <- project_name
+  }
+
+  if (length(project_names) == 0) {
+    message("No projects found in database")
+    return(invisible(FALSE))
+  }
+
+  # Check if projects table exists, create if needed
+  if (!"projects" %in% all_tables) {
+    if (create_table) {
+      # Create projects table
+      create_projects_query <- "
+        CREATE TABLE projects (
+          project_name TEXT PRIMARY KEY,
+          dataset_type TEXT,
+          data_types TEXT,
+          sample_count INTEGER,
+          drug_count INTEGER,
+          created_date TEXT,
+          updated_date TEXT
+        )"
+      DBI::dbExecute(connection, create_projects_query)
+      message("Created projects table")
+    } else {
+      stop("Projects table does not exist. Set create_table = TRUE to create it.")
+    }
+  }
+
+  # Get existing projects data
+  existing_projects <- DBI::dbReadTable(connection, "projects")
+
+  # Process each project
+  updated_count <- 0
+  added_count <- 0
+
+  for (proj in project_names) {
+    # Get tables for this project
+    project_tables <- grep(paste0("^", proj, "_"), all_tables, value = TRUE)
+
+    if (length(project_tables) == 0) {
+      warning("No tables found for project '", proj, "'")
+      next
+    }
+
+    # Extract data types from table names
+    data_types <- unique(sapply(project_tables, function(t) {
+      sub(paste0("^", proj, "_"), "", t)
+    }))
+
+    # Try to determine dataset type from sample_anno
+    dataset_type <- NA_character_
+    sample_count <- 0
+
+    if ("sample_anno" %in% all_tables) {
+      # Get sample IDs for this project from all project tables
+      sample_ids <- c()
+
+      for (table in project_tables) {
+        tryCatch({
+          # Get column names from the table
+          columns_query <- paste0("PRAGMA table_info(", table, ")")
+          columns_info <- DBI::dbGetQuery(connection, columns_query)
+          table_columns <- columns_info$name[columns_info$name != "feature_id"]
+
+          if (length(table_columns) > 0) {
+            sample_ids <- c(sample_ids, table_columns)
+          }
+        }, error = function(e) {
+          # Skip tables that can't be processed
+        })
+      }
+
+      sample_ids <- unique(sample_ids)
+      sample_count <- length(sample_ids)
+
+      if (length(sample_ids) > 0) {
+        # Look up dataset type in sample_anno
+        tryCatch({
+          # Use parameterized query to avoid SQL injection
+          placeholders <- paste(rep("?", length(sample_ids)), collapse = ",")
+          types_query <- paste0(
+            "SELECT DISTINCT DataType FROM sample_anno WHERE SampleID IN (",
+            placeholders, ") AND ProjectID = ?"
+          )
+          params <- c(as.list(sample_ids), proj)
+          types_result <- DBI::dbGetQuery(connection, types_query, params = params)
+
+          if (nrow(types_result) > 0) {
+            dataset_type <- types_result$DataType[1]
+          }
+        }, error = function(e) {
+          # If sample_anno query fails, continue without dataset type
+        })
+      }
+    }
+
+    # Count drugs in drug table if available
+    drug_count <- 0
+    drug_table <- paste0(proj, "_drug")
+    if (drug_table %in% all_tables) {
+      tryCatch({
+        drug_count_query <- paste0("SELECT COUNT(*) as count FROM ", drug_table)
+        drug_count_result <- DBI::dbGetQuery(connection, drug_count_query)
+        drug_count <- drug_count_result$count[1]
+      }, error = function(e) {
+        # If drug count query fails, keep drug_count as 0
+      })
+    }
+
+    # Prepare project metadata
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    data_types_str <- paste(sort(data_types), collapse = ",")
+
+    # Check if project already exists
+    if (proj %in% existing_projects$project_name) {
+      # Update existing project
+      update_query <- "
+        UPDATE projects SET
+          dataset_type = ?,
+          data_types = ?,
+          sample_count = ?,
+          drug_count = ?,
+          updated_date = ?
+        WHERE project_name = ?"
+
+      DBI::dbExecute(connection, update_query, params = list(
+        dataset_type, data_types_str, sample_count, drug_count, current_time, proj
+      ))
+
+      message("Updated project '", proj, "' with ", length(data_types), " data types (",
+              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
+      updated_count <- updated_count + 1
+
+    } else {
+      # Add new project
+      insert_query <- "
+        INSERT INTO projects (project_name, dataset_type, data_types, sample_count, drug_count, created_date, updated_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)"
+
+      DBI::dbExecute(connection, insert_query, params = list(
+        proj, dataset_type, data_types_str, sample_count, drug_count, current_time, current_time
+      ))
+
+      message("Added new project '", proj, "' with ", length(data_types), " data types (",
+              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
+      added_count <- added_count + 1
+    }
+  }
+
+  # Summary message
+  if (added_count > 0 || updated_count > 0) {
+    message("Project metadata update complete: ", added_count, " projects added, ",
+            updated_count, " projects updated")
+  } else {
+    message("No projects were added or updated")
+  }
+
+  invisible(TRUE)
 }
 
