@@ -283,13 +283,12 @@ We welcome contributions! Please see our contributing guidelines:
 If you use DROMA_Set in your research, please cite:
 
 ```
-Zhong, P.Y. (2024). DROMA_Set: Drug Response and Omics Multi-project Analysis Set. 
-R package version 0.9.0. https://github.com/mugpeng/DROMA_Set
+Li, S., Peng, Y., Chen, M. et al. Facilitating integrative and personalized oncology omics analysis with UCSCXenaShiny. Commun Biol 7, 1200 (2024). https://doi.org/10.1038/s42003-024-06891-2
 ```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MPL-2 License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
@@ -298,8 +297,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 📖 **Documentation**: [Package Documentation](https://mugpeng.github.io/DROMA_Set/)
 
 ## Changelog
+### Version 0.4.3
+Add updateDROMAProjects function to manage project metadata in DROMA database; enhance listDROMADatabaseTables with feature and sample counts; minor adjustments in example script.
 
-### Version 0.9.0
+### Version 0.4.1
 - Initial release
 - DromaSet and MultiDromaSet classes
 - Database integration and management
