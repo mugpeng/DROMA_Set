@@ -11,7 +11,7 @@ Description: DROMA_Set provides a comprehensive framework for managing and analy
     metadata management, sample overlap detection, and flexible data loading 
     capabilities for various molecular profile types (mRNA, CNV, mutations, etc.) 
     and treatment response data.
-License: Mozilla Public License
+License: MPL-2.0 + file LICENSE
 URL: https://github.com/mugpeng/DROMA_Set
 BugReports: https://github.com/mugpeng/DROMA_Set/issues
 Depends: 

@@ -13,7 +13,7 @@ cat("Creating DROMA database (this may take a few minutes)...\n")
 # createDROMADatabase(db_path = "sql_db/droma.sqlite", rda_dir = "data/Rda")
 
 # Connect to the database
-connectDROMADatabase(db_path = "data/droma.sqlite")
+db_conn <- connectDROMADatabase(db_path = "data/droma.sqlite")
 
 # ---------- List Available Tables ----------
 

@@ -7,7 +7,7 @@
 closeDROMADatabase(connection = NULL)
 }
 \arguments{
-\item{connection}{Optional database connection object. If NULL, uses global connection.}
+\item{connection}{Optional database connection object. If NULL, uses global connection}
 }
 \value{
 TRUE if successfully disconnected

@@ -299,7 +299,7 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas,
 #' Close DROMA Database Connection
 #'
 #' @description Closes the connection to the DROMA database
-#' @param connection Optional database connection object. If NULL, uses global connection.
+#' @param connection Optional database connection object. If NULL, uses global connection
 #' @return TRUE if successfully disconnected
 #' @export
 closeDROMADatabase <- function(connection = NULL) {
@@ -1319,6 +1319,729 @@ updateDROMAProjects <- function(project_name = NULL, connection = NULL, create_t
             updated_count, " projects updated")
   } else {
     message("No projects were added or updated")
+  }
+
+  invisible(TRUE)
+}
+
+#' Check and Harmonize Sample Names Against DROMA Database
+#'
+#' @description Checks sample names (column names) against the sample_anno table in the DROMA database
+#' and provides harmonized mappings. Uses fuzzy matching and name cleaning similar to the approach
+#' in 02-harmonized_name.Rmd.
+#'
+#' @param sample_names Character vector of sample names to check and harmonize
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @param max_distance Numeric, maximum distance for fuzzy matching (default: 0.2)
+#' @param min_name_length Integer, minimum name length for partial matching (default: 5)
+#' @return A data frame with columns: original_name, cleaned_name, harmonized_name, match_type, match_confidence, new_name
+#' @export
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # Check sample names from a data matrix
+#' sample_names <- colnames(my_data_matrix)
+#' name_mapping <- checkDROMASampleNames(sample_names)
+#'
+#' # View the mapping results
+#' print(name_mapping)
+#' }
+checkDROMASampleNames <- function(sample_names, connection = NULL, max_distance = 0.2, min_name_length = 5) {
+  if (!requireNamespace("DBI", quietly = TRUE)) {
+    stop("Package 'DBI' is required. Please install with install.packages('DBI')")
+  }
+
+  # Get connection from global environment if not provided
+  if (is.null(connection)) {
+    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
+      stop("No database connection found. Connect first with connectDROMADatabase()")
+    }
+    connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  # Check if sample_anno table exists
+  all_tables <- DBI::dbListTables(connection)
+  if (!"sample_anno" %in% all_tables) {
+    stop("Sample annotation table 'sample_anno' not found in database")
+  }
+
+  # Get sample annotation data
+  sample_anno <- DBI::dbReadTable(connection, "sample_anno")
+
+  # Function to clean sample names for better matching
+  clean_sample_name <- function(name) {
+    # Convert to lowercase
+    name <- tolower(name)
+
+    # Remove [?]
+    name <- gsub("[?]", "", name, fixed = TRUE)
+
+    # Remove Chinese characters (if any)
+    name <- gsub("[\\p{Han}]", "", name, perl = TRUE)
+
+    # First remove [xx] format and its contents
+    name <- gsub("\\[.*?\\]", "", name)
+
+    # Handle parentheses - only remove if there's content outside them
+    if (!grepl("^\\s*\\(.*\\)\\s*$", name)) {
+      name <- gsub("\\s*\\([^\\)]+\\)", "", name)
+    } else {
+      # For names entirely in parentheses, remove the parentheses but keep content
+      name <- gsub("^\\s*\\(|\\)\\s*$", "", name)
+    }
+
+    # Remove special characters and extra spaces
+    name <- gsub("[^a-z0-9]", "", name)
+    name <- trimws(name)
+
+    return(name)
+  }
+
+  # Clean reference names in sample_anno
+  sample_anno$clean_sampleid <- sapply(sample_anno$SampleID, clean_sample_name)
+  sample_anno$clean_rawname <- sapply(sample_anno$ProjectRawName, clean_sample_name)
+
+  # Handle AlternateName column if it exists and create alternate name mapping
+  alternate_mapping <- data.frame()
+  if ("AlternateName" %in% colnames(sample_anno)) {
+    for (i in 1:nrow(sample_anno)) {
+      harmonized_name <- sample_anno$SampleID[i]
+
+      # Add the harmonized name itself
+      alternate_mapping <- rbind(alternate_mapping, data.frame(
+        raw_name = harmonized_name,
+        harmonized_name = harmonized_name,
+        clean_name = clean_sample_name(harmonized_name),
+        stringsAsFactors = FALSE
+      ))
+
+      # Process alternate names if they exist
+      if (!is.na(sample_anno$AlternateName[i]) && sample_anno$AlternateName[i] != "") {
+        alt_names <- strsplit(sample_anno$AlternateName[i], ":|:")[[1]]
+        alt_names <- alt_names[!alt_names %in% "|" & alt_names != ""]
+        # Add each alternate name
+        for (alt_name in alt_names) {
+          alternate_mapping <- rbind(alternate_mapping, data.frame(
+            raw_name = alt_name,
+            harmonized_name = harmonized_name,
+            clean_name = clean_sample_name(alt_name),
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+    }
+  }
+
+  # Clean input sample names
+  sample_names_clean <- sapply(sample_names, clean_sample_name)
+
+  # Create result data frame
+  result <- data.frame(
+    original_name = sample_names,
+    cleaned_name = sample_names_clean,
+    harmonized_name = NA_character_,
+    match_type = NA_character_,
+    match_confidence = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  # Match each sample name
+  for (i in 1:length(sample_names)) {
+    clean_name <- sample_names_clean[i]
+    original_name <- sample_names[i]
+
+    # For very long names, keep original
+    if (nchar(original_name) > 30) {
+      result$harmonized_name[i] <- original_name
+      result$match_type[i] <- "keep_original_long"
+      result$match_confidence[i] <- "high"
+      next
+    }
+
+    # Try exact match with SampleID
+    exact_sampleid <- which(sample_anno$clean_sampleid == clean_name)
+    if (length(exact_sampleid) > 0) {
+      result$harmonized_name[i] <- sample_anno$SampleID[exact_sampleid[1]]
+      result$match_type[i] <- "exact_sampleid"
+      result$match_confidence[i] <- "high"
+      result$new_name[i] <- sample_anno$SampleID[exact_sampleid[1]]
+      next
+    }
+
+    # Try exact match with ProjectRawName
+    exact_rawname <- which(sample_anno$clean_rawname == clean_name)
+    if (length(exact_rawname) > 0) {
+      result$harmonized_name[i] <- sample_anno$SampleID[exact_rawname[1]]
+      result$match_type[i] <- "exact_rawname"
+      result$match_confidence[i] <- "high"
+      result$new_name[i] <- sample_anno$SampleID[exact_rawname[1]]
+      next
+    }
+
+    # Try exact match with AlternateName if available
+    if (nrow(alternate_mapping) > 0) {
+      exact_alternate <- which(alternate_mapping$clean_name == clean_name)
+      if (length(exact_alternate) > 0) {
+        result$harmonized_name[i] <- alternate_mapping$harmonized_name[exact_alternate[1]]
+        result$match_type[i] <- "exact_alternate"
+        result$match_confidence[i] <- "high"
+        result$new_name[i] <- alternate_mapping$harmonized_name[exact_alternate[1]]
+        next
+      }
+    }
+
+    # Try fuzzy match with SampleID
+    if (nchar(clean_name) >= 3) {
+      fuzzy_sampleid <- agrep(clean_name, sample_anno$clean_sampleid, max.distance = max_distance, value = FALSE)
+      if (length(fuzzy_sampleid) > 0) {
+        result$harmonized_name[i] <- sample_anno$SampleID[fuzzy_sampleid[1]]
+        result$match_type[i] <- "fuzzy_sampleid"
+        result$match_confidence[i] <- "medium"
+        result$new_name[i] <- sample_anno$SampleID[fuzzy_sampleid[1]]
+        next
+      }
+    }
+
+    # Try fuzzy match with ProjectRawName
+    if (nchar(clean_name) >= 3) {
+      fuzzy_rawname <- agrep(clean_name, sample_anno$clean_rawname, max.distance = max_distance, value = FALSE)
+      if (length(fuzzy_rawname) > 0) {
+        result$harmonized_name[i] <- sample_anno$SampleID[fuzzy_rawname[1]]
+        result$match_type[i] <- "fuzzy_rawname"
+        result$match_confidence[i] <- "medium"
+        result$new_name[i] <- sample_anno$SampleID[fuzzy_rawname[1]]
+        next
+      }
+    }
+
+    # Try fuzzy match with AlternateName if available
+    if (nrow(alternate_mapping) > 0 && nchar(clean_name) >= 3) {
+      fuzzy_alternate <- agrep(clean_name, alternate_mapping$clean_name, max.distance = max_distance, value = FALSE)
+      if (length(fuzzy_alternate) > 0) {
+        result$harmonized_name[i] <- alternate_mapping$harmonized_name[fuzzy_alternate[1]]
+        result$match_type[i] <- "fuzzy_alternate"
+        result$match_confidence[i] <- "medium"
+        result$new_name[i] <- alternate_mapping$harmonized_name[fuzzy_alternate[1]]
+        next
+      }
+    }
+
+    # Try partial match (sample name is contained in annotation)
+    if (nchar(clean_name) >= min_name_length) {
+      # Check if sample name is contained in SampleID names
+      partial_sampleid <- which(sapply(sample_anno$clean_sampleid, function(x) grepl(clean_name, x, fixed = TRUE)))
+      if (length(partial_sampleid) > 0) {
+        result$harmonized_name[i] <- sample_anno$SampleID[partial_sampleid[1]]
+        result$match_type[i] <- "partial_sampleid"
+        result$match_confidence[i] <- "low"
+        result$new_name[i] <- sample_anno$SampleID[partial_sampleid[1]]
+        next
+      }
+
+      # Check if sample name is contained in ProjectRawName names
+      partial_rawname <- which(sapply(sample_anno$clean_rawname, function(x) grepl(clean_name, x, fixed = TRUE)))
+      if (length(partial_rawname) > 0) {
+        result$harmonized_name[i] <- sample_anno$SampleID[partial_rawname[1]]
+        result$match_type[i] <- "partial_rawname"
+        result$match_confidence[i] <- "low"
+        result$new_name[i] <- sample_anno$SampleID[partial_rawname[1]]
+        next
+      }
+    }
+
+    # No match found - use cleaned name
+    result$harmonized_name[i] <- clean_name
+    result$match_type[i] <- "no_match"
+    result$match_confidence[i] <- "none"
+  }
+
+  # Set new_name based on match_confidence
+  result$new_name <- ifelse(result$match_confidence == "high",
+                           result$harmonized_name,
+                           result$original_name)
+
+  # Print summary
+  match_summary <- table(result$match_type)
+  message("Sample name matching summary:")
+  for (match_type in names(match_summary)) {
+    message("    ", match_type, ": ", match_summary[match_type])
+  }
+
+  # Warn about low confidence matches
+  low_confidence <- result[result$match_confidence %in% c("medium", "low"), ]
+  if (nrow(low_confidence) > 0) {
+    message("\nWarning: ", nrow(low_confidence), " samples have medium/low confidence matches.")
+    message("Consider manual review of these matches:")
+    for (i in 1:min(5, nrow(low_confidence))) {
+      message("    ", low_confidence$original_name[i], " -> ", low_confidence$harmonized_name[i],
+              " (", low_confidence$match_type[i], ")")
+    }
+    if (nrow(low_confidence) > 5) {
+      message("    ... and ", nrow(low_confidence) - 5, " more")
+    }
+  }
+
+  return(result)
+}
+
+#' Check and Harmonize Drug Names Against DROMA Database
+#'
+#' @description Checks drug names (row names) against the drug_anno table in the DROMA database
+#' and provides harmonized mappings. Uses fuzzy matching and name cleaning similar to the approach
+#' in 02-harmonized_name.Rmd.
+#'
+#' @param drug_names Character vector of drug names to check and harmonize
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @param max_distance Numeric, maximum distance for fuzzy matching (default: 0.2)
+#' @param min_name_length Integer, minimum name length for partial matching (default: 5)
+#' @param keep_long_names_threshold Integer, names longer than this will be kept as original (default: 17)
+#' @return A data frame with columns: original_name, cleaned_name, harmonized_name, match_type, match_confidence, new_name
+#' @export
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # Check drug names from a drug response matrix
+#' drug_names <- rownames(my_drug_matrix)
+#' name_mapping <- checkDROMADrugNames(drug_names)
+#'
+#' # View the mapping results
+#' print(name_mapping)
+#' }
+checkDROMADrugNames <- function(drug_names, connection = NULL, max_distance = 0.2,
+                               min_name_length = 5, keep_long_names_threshold = 17) {
+  if (!requireNamespace("DBI", quietly = TRUE)) {
+    stop("Package 'DBI' is required. Please install with install.packages('DBI')")
+  }
+
+  # Get connection from global environment if not provided
+  if (is.null(connection)) {
+    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
+      stop("No database connection found. Connect first with connectDROMADatabase()")
+    }
+    connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  # Check if drug_anno table exists
+  all_tables <- DBI::dbListTables(connection)
+  if (!"drug_anno" %in% all_tables) {
+    stop("Drug annotation table 'drug_anno' not found in database")
+  }
+
+  # Get drug annotation data
+  drug_anno <- DBI::dbReadTable(connection, "drug_anno")
+
+  # Function to clean drug names for better matching
+  clean_drug_name <- function(name) {
+    # Convert to lowercase
+    name <- tolower(name)
+
+    # Remove [?]
+    name <- gsub("[?]", "", name, fixed = TRUE)
+
+    # Remove Chinese characters (if any)
+    name <- gsub("[\\p{Han}]", "", name, perl = TRUE)
+
+    # Handle parentheses - only remove if there's content outside them
+    if (!grepl("^\\s*\\(.*\\)\\s*$", name)) {
+      name <- gsub("\\s*\\([^\\)]+\\)", "", name)
+    } else {
+      # For names entirely in parentheses, remove the parentheses but keep content
+      name <- gsub("^\\s*\\(|\\)\\s*$", "", name)
+    }
+
+    # Remove special characters and extra spaces
+    name <- gsub("[^a-z0-9]", " ", name)
+    name <- gsub("\\s+", " ", name)
+    name <- trimws(name)
+
+    return(name)
+  }
+
+  # Clean reference names in drug_anno
+  drug_anno$clean_drugname <- sapply(drug_anno$DrugName, clean_drug_name)
+  drug_anno$clean_rawname <- sapply(drug_anno$ProjectRawName, clean_drug_name)
+
+  # Clean input drug names
+  drug_names_clean <- sapply(drug_names, clean_drug_name)
+
+  # Create result data frame
+  result <- data.frame(
+    original_name = drug_names,
+    cleaned_name = drug_names_clean,
+    harmonized_name = NA_character_,
+    match_type = NA_character_,
+    match_confidence = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  # Match each drug name
+  for (i in 1:length(drug_names)) {
+    clean_name <- drug_names_clean[i]
+    original_name <- drug_names[i]
+
+    # For very long drug names, keep original
+    if (nchar(original_name) > keep_long_names_threshold) {
+      result$harmonized_name[i] <- original_name
+      result$match_type[i] <- "keep_original_long"
+      result$match_confidence[i] <- "medium"
+      next
+    }
+
+    # Try exact match with DrugName
+    exact_drugname <- which(drug_anno$clean_drugname == clean_name)
+    if (length(exact_drugname) > 0) {
+      result$harmonized_name[i] <- drug_anno$DrugName[exact_drugname[1]]
+      result$match_type[i] <- "exact_drugname"
+      result$match_confidence[i] <- "high"
+      next
+    }
+
+    # Try exact match with ProjectRawName
+    exact_rawname <- which(drug_anno$clean_rawname == clean_name)
+    if (length(exact_rawname) > 0) {
+      result$harmonized_name[i] <- drug_anno$DrugName[exact_rawname[1]]
+      result$match_type[i] <- "exact_rawname"
+      result$match_confidence[i] <- "high"
+      next
+    }
+
+    # Try fuzzy match with DrugName
+    if (nchar(clean_name) >= 3) {
+      fuzzy_drugname <- agrep(clean_name, drug_anno$clean_drugname, max.distance = max_distance, value = FALSE)
+      if (length(fuzzy_drugname) > 0) {
+        result$harmonized_name[i] <- drug_anno$DrugName[fuzzy_drugname[1]]
+        result$match_type[i] <- "fuzzy_drugname"
+        result$match_confidence[i] <- "medium"
+        next
+      }
+    }
+
+    # Try fuzzy match with ProjectRawName
+    if (nchar(clean_name) >= 3) {
+      fuzzy_rawname <- agrep(clean_name, drug_anno$clean_rawname, max.distance = max_distance, value = FALSE)
+      if (length(fuzzy_rawname) > 0) {
+        result$harmonized_name[i] <- drug_anno$DrugName[fuzzy_rawname[1]]
+        result$match_type[i] <- "fuzzy_rawname"
+        result$match_confidence[i] <- "medium"
+        next
+      }
+    }
+
+    # Try partial match (drug name is contained in annotation)
+    if (nchar(clean_name) >= min_name_length) {
+      # Check if drug name is contained in DrugName names
+      partial_drugname <- which(sapply(drug_anno$clean_drugname, function(x) grepl(clean_name, x, fixed = TRUE)))
+      if (length(partial_drugname) > 0) {
+        result$harmonized_name[i] <- drug_anno$DrugName[partial_drugname[1]]
+        result$match_type[i] <- "partial_drugname"
+        result$match_confidence[i] <- "low"
+        next
+      }
+
+      # Check if drug name is contained in ProjectRawName names
+      partial_rawname <- which(sapply(drug_anno$clean_rawname, function(x) grepl(clean_name, x, fixed = TRUE)))
+      if (length(partial_rawname) > 0) {
+        result$harmonized_name[i] <- drug_anno$DrugName[partial_rawname[1]]
+        result$match_type[i] <- "partial_rawname"
+        result$match_confidence[i] <- "low"
+        next
+      }
+    }
+
+    # No match found - use cleaned name
+    result$harmonized_name[i] <- clean_name
+    result$match_type[i] <- "no_match"
+    result$match_confidence[i] <- "none"
+  }
+
+  # Set new_name based on match_confidence
+  result$new_name <- ifelse(result$match_confidence == "high",
+                           result$harmonized_name,
+                           result$original_name)
+
+  # Print summary
+  match_summary <- table(result$match_type)
+  message("Drug name matching summary:")
+  for (match_type in names(match_summary)) {
+    message("    ", match_type, ": ", match_summary[match_type])
+  }
+
+  # Warn about low confidence matches
+  low_confidence <- result[result$match_confidence %in% c("medium", "low"), ]
+  if (nrow(low_confidence) > 0) {
+    message("\nWarning: ", nrow(low_confidence), " drugs have medium/low confidence matches.")
+    message("Consider manual review of these matches:")
+    for (i in 1:min(5, nrow(low_confidence))) {
+      message("    ", low_confidence$original_name[i], " -> ", low_confidence$harmonized_name[i],
+              " (", low_confidence$match_type[i], ")")
+    }
+    if (nrow(low_confidence) > 5) {
+      message("    ... and ", nrow(low_confidence) - 5, " more")
+    }
+  }
+
+  return(result)
+}
+
+#' Update DROMA Annotation Tables with New Names
+#'
+#' @description Adds harmonized sample or drug names to the corresponding annotation tables.
+#' Processes all entries from the name_mapping dataframe. For high confidence matches,
+#' uses existing annotation information when available. Creates new entries with new_name
+#' as the primary identifier and original_name recorded in ProjectRawName. Updates existing
+#' entries if they already exist in the database.
+#'
+#' @param anno_type Character, type of annotation to update: "sample" or "drug"
+#' @param name_mapping Data frame with name mappings (output from checkDROMASampleNames or checkDROMADrugNames)
+#' @param project_name Character, the project name to assign to new entries
+#' @param data_type Character, the data type to assign to new entries (e.g., "CellLine", "PDC", "PDX" for samples)
+#' @param tumor_type Character, the tumor type to assign to new sample entries (default: NA)
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @return Invisibly returns TRUE if successful, along with a summary of changes
+#' @export
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # Check and harmonize sample names
+#' sample_mapping <- checkDROMASampleNames(colnames(my_data))
+#'
+#' # Update sample annotations
+#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+#'                      data_type = "CellLine", tumor_type = "breast cancer")
+#'
+#' # Check and harmonize drug names
+#' drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
+#'
+#' # Update drug annotations
+#' updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject",
+#'                      data_type = "CellLine")
+#' }
+updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_type,
+                                 tumor_type = NA_character_, connection = NULL) {
+  if (!requireNamespace("DBI", quietly = TRUE)) {
+    stop("Package 'DBI' is required. Please install with install.packages('DBI')")
+  }
+
+  # Validate anno_type
+  if (!anno_type %in% c("sample", "drug")) {
+    stop("anno_type must be either 'sample' or 'drug'")
+  }
+
+  # Validate name_mapping structure
+  required_cols <- c("original_name", "cleaned_name", "harmonized_name", "match_type", "match_confidence", "new_name")
+  if (!all(required_cols %in% colnames(name_mapping))) {
+    stop("name_mapping must contain columns: ", paste(required_cols, collapse = ", "))
+  }
+
+  # Get connection from global environment if not provided
+  if (is.null(connection)) {
+    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
+      stop("No database connection found. Connect first with connectDROMADatabase()")
+    }
+    connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  # Determine table name and column names
+  if (anno_type == "sample") {
+    table_name <- "sample_anno"
+    id_column <- "SampleID"
+    raw_column <- "ProjectRawName"
+    index_prefix <- "UM_SAMPLE_"
+  } else {
+    table_name <- "drug_anno"
+    id_column <- "DrugName"
+    raw_column <- "ProjectRawName"
+    index_prefix <- "UM_DRUG_"
+  }
+
+  # Check if table exists
+  all_tables <- DBI::dbListTables(connection)
+  if (!table_name %in% all_tables) {
+    stop("Annotation table '", table_name, "' not found in database")
+  }
+
+  # Get existing annotation data
+  existing_anno <- DBI::dbReadTable(connection, table_name)
+
+  # Find the maximum IndexID number for generating new IDs
+  max_index_num <- 0
+  if ("IndexID" %in% colnames(existing_anno) && nrow(existing_anno) > 0) {
+    # Extract numbers from IndexID column
+    index_ids <- existing_anno$IndexID[!is.na(existing_anno$IndexID)]
+    if (length(index_ids) > 0) {
+      # Extract numbers from IndexID strings like "UM_SAMPLE_1" or "UM_DRUG_2077"
+      numbers <- as.numeric(gsub(paste0("^", index_prefix), "", index_ids))
+      numbers <- numbers[!is.na(numbers)]
+      if (length(numbers) > 0) {
+        max_index_num <- max(numbers)
+      }
+    }
+  }
+
+  # Initialize counters
+  added_count <- 0
+  current_index_num <- max_index_num
+
+  # Process ALL entries from name_mapping - add each as a new entry
+  for (i in 1:nrow(name_mapping)) {
+    new_name <- name_mapping$new_name[i]
+    original_name <- name_mapping$original_name[i]
+    match_confidence <- name_mapping$match_confidence[i]
+
+    # Determine IndexID for this entry
+    new_index_id <- NA_character_
+    if (match_confidence == "high") {
+      # For high confidence matches, try to use existing IndexID if available
+      if (anno_type == "sample") {
+        original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
+                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      } else {
+        original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
+                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      }
+
+      if (length(original_entry_idx) > 0) {
+        original_entry <- existing_anno[original_entry_idx[1], ]
+        if ("IndexID" %in% colnames(original_entry) && !is.na(original_entry$IndexID)) {
+          new_index_id <- original_entry$IndexID
+        }
+      }
+    }
+
+    # If no existing IndexID found (or not high confidence), generate new one
+    if (is.na(new_index_id)) {
+      current_index_num <- current_index_num + 1
+      new_index_id <- paste0(index_prefix, current_index_num)
+    }
+
+    # Add new entry - behavior depends on match_confidence
+    if (match_confidence == "high") {
+      # For high confidence matches, check if we can find existing info from the harmonized name
+      if (anno_type == "sample") {
+        original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
+                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      } else {
+        original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
+                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      }
+
+      if (length(original_entry_idx) > 0) {
+        # Use existing entry info but update for this project
+        original_entry <- existing_anno[original_entry_idx[1], ]
+
+        if (anno_type == "sample") {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                                "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                                "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name,
+            if("PatientID" %in% colnames(original_entry)) original_entry$PatientID else NA_character_,
+            project_name,
+            if("HarmonizedIdentifier" %in% colnames(original_entry)) original_entry$HarmonizedIdentifier else NA_character_,
+            if(!is.na(tumor_type)) tumor_type else (if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_),
+            if("MolecularSubtype" %in% colnames(original_entry)) original_entry$MolecularSubtype else NA_character_,
+            if("Gender" %in% colnames(original_entry)) original_entry$Gender else NA_character_,
+            if("Age" %in% colnames(original_entry)) original_entry$Age else NA_character_,
+            if("FullEthnicity" %in% colnames(original_entry)) original_entry$FullEthnicity else NA_character_,
+            if("SimpleEthnicity" %in% colnames(original_entry)) original_entry$SimpleEthnicity else NA_character_,
+            if("TNMstage" %in% colnames(original_entry)) original_entry$TNMstage else NA_character_,
+            if("Primary_Metastasis" %in% colnames(original_entry)) original_entry$Primary_Metastasis else NA_character_,
+            data_type,
+            original_name,
+            if("AlternateName" %in% colnames(original_entry)) original_entry$AlternateName else NA_character_,
+            new_index_id
+          ))
+        } else {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                                "`Clinical Phase`, MOA, Targets, DataType, ProjectRawName, IndexID) ",
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name,
+            project_name,
+            if("Harmonized ID (Pubchem ID)" %in% colnames(original_entry)) original_entry$`Harmonized ID (Pubchem ID)` else NA_character_,
+            if("Source for Clinical Information" %in% colnames(original_entry)) original_entry$`Source for Clinical Information` else NA_character_,
+            if("Clinical Phase" %in% colnames(original_entry)) original_entry$`Clinical Phase` else NA_character_,
+            if("MOA" %in% colnames(original_entry)) original_entry$MOA else NA_character_,
+            if("Targets" %in% colnames(original_entry)) original_entry$Targets else NA_character_,
+            data_type,
+            original_name,
+            new_index_id
+          ))
+        }
+        added_count <- added_count + 1
+      } else {
+        # Couldn't find original entry, create new one
+        if (anno_type == "sample") {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                                "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                                "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name, NA_character_, project_name, NA_character_, tumor_type,
+            NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+            NA_character_, NA_character_, data_type, original_name, NA_character_, new_index_id
+          ))
+        } else {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                                "`Clinical Phase`, MOA, Targets, DataType, ProjectRawName, IndexID) ",
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name, project_name, NA_character_, NA_character_,
+            NA_character_, NA_character_, NA_character_, data_type, original_name, new_index_id
+          ))
+        }
+        added_count <- added_count + 1
+      }
+    } else {
+      # For non-high confidence matches, create new entry with new_name as identifier and new IndexID
+      if (anno_type == "sample") {
+        insert_query <- paste0("INSERT INTO ", table_name, " (",
+                              "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                              "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                              "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        DBI::dbExecute(connection, insert_query, params = list(
+          new_name, NA_character_, project_name, NA_character_, tumor_type,
+          NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+          NA_character_, NA_character_, data_type, original_name, NA_character_, new_index_id
+        ))
+      } else {
+        insert_query <- paste0("INSERT INTO ", table_name, " (",
+                              "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                              "`Clinical Phase`, MOA, Targets, DataType, ProjectRawName, IndexID) ",
+                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        DBI::dbExecute(connection, insert_query, params = list(
+          new_name, project_name, NA_character_, NA_character_,
+          NA_character_, NA_character_, NA_character_, data_type, original_name, new_index_id
+        ))
+      }
+      added_count <- added_count + 1
+    }
+  }
+
+  # Print summary
+  message("Updated ", table_name, " table:")
+  message("  Added: ", added_count, " new entries")
+  if (current_index_num > max_index_num) {
+    message("  Generated new IndexIDs from ", index_prefix, max_index_num + 1, " to ", index_prefix, current_index_num)
+  }
+
+  # Print match type summary for all entries
+  match_summary <- table(name_mapping$match_type)
+  message("  Match types for processed entries:")
+  for (match_type in names(match_summary)) {
+    message("    ", match_type, ": ", match_summary[match_type])
   }
 
   invisible(TRUE)
