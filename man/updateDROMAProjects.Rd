@@ -6,6 +6,7 @@
 \usage{
 updateDROMAProjects(
   project_name = NULL,
+  dataset_type = NULL,
   connection = NULL,
   create_table = TRUE
 )
@@ -13,6 +14,9 @@ updateDROMAProjects(
 \arguments{
 \item{project_name}{Character, the name of the project to update (e.g., "gCSI", "CCLE").
 If NULL, updates all projects found in the database.}
+
+\item{dataset_type}{Character, the dataset type to assign to the project(s) (e.g., "CellLine", "PDX", "PDO").
+If NULL, attempts to guess from sample_anno table (default: NULL)}
 
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 
@@ -36,10 +40,10 @@ con <- connectDROMADatabase("path/to/droma.sqlite")
 updateDROMADatabase(expr_data, "gCSI_mRNA", overwrite = TRUE)
 updateDROMADatabase(cnv_data, "gCSI_cnv", overwrite = TRUE)
 
-# Update project metadata for gCSI
-updateDROMAProjects("gCSI")
+# Update project metadata for gCSI with specific dataset type
+updateDROMAProjects("gCSI", dataset_type = "CellLine")
 
-# Update all projects in the database
+# Update all projects in the database (auto-detect dataset type)
 updateDROMAProjects()
 }
 }

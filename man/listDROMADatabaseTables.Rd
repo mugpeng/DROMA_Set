@@ -12,8 +12,9 @@ listDROMADatabaseTables(pattern = NULL, connection = NULL)
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 }
 \value{
-A data frame with table information
+A data frame with table information including created_date from projects table
 }
 \description{
-Provides information about tables available in the DROMA database
+Provides information about omics and drug tables in the DROMA database.
+Excludes annotation tables, projects table, and backup tables.
 }

@@ -24,17 +24,17 @@ updateDROMAAnnotation(
 
 \item{project_name}{Character, the project name to assign to new entries}
 
-\item{data_type}{Character, the data type to assign to new sample entries (e.g., "CellLine", "PDC", "PDX", only for sample annotations)}
+\item{data_type}{Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)}
 
-\item{tumor_type}{Character, the tumor type to assign to new sample entries (default: NA, only for sample annotations)}
+\item{tumor_type}{Character or character vector, the tumor type(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
-\item{Gender}{Character, the gender to assign to new sample entries (default: NA, only for sample annotations)}
+\item{Gender}{Character or character vector, the gender(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
 \item{Age}{Numeric or numeric vector, the age(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
-\item{FullEthnicity}{Character, the full ethnicity to assign to new sample entries (default: NA, only for sample annotations)}
+\item{FullEthnicity}{Character or character vector, the full ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
-\item{SimpleEthnicity}{Character, the simple ethnicity to assign to new sample entries (default: NA, only for sample annotations)}
+\item{SimpleEthnicity}{Character or character vector, the simple ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 }
@@ -56,15 +56,19 @@ con <- connectDROMADatabase("path/to/droma.sqlite")
 # Check and harmonize sample names
 sample_mapping <- checkDROMASampleNames(colnames(my_data))
 
-# Update sample annotations with single age
+# Update sample annotations with single values
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
                      data_type = "CellLine", tumor_type = "breast cancer",
                      Gender = "Female", Age = 45)
 
-# Update sample annotations with age vector
+# Update sample annotations with vectors (one value per sample)
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
-                     data_type = "CellLine", tumor_type = "breast cancer",
-                     Gender = "Female", Age = c(45, 52, 38, 41))
+                     data_type = c("CellLine", "PDX", "CellLine", "PDO"),
+                     tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
+                     Gender = c("Female", "Male", "Female", "Male"),
+                     Age = c(45, 52, 38, 41),
+                     FullEthnicity = c("European", "Asian", "African", "Hispanic"),
+                     SimpleEthnicity = c("Caucasian", "Asian", "African", "Hispanic"))
 
 # Check and harmonize drug names
 drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
