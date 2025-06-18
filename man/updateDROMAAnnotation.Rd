@@ -24,13 +24,13 @@ updateDROMAAnnotation(
 
 \item{project_name}{Character, the project name to assign to new entries}
 
-\item{data_type}{Character, the data type to assign to new entries (e.g., "CellLine", "PDC", "PDX" for samples)}
+\item{data_type}{Character, the data type to assign to new sample entries (e.g., "CellLine", "PDC", "PDX", only for sample annotations)}
 
 \item{tumor_type}{Character, the tumor type to assign to new sample entries (default: NA, only for sample annotations)}
 
 \item{Gender}{Character, the gender to assign to new sample entries (default: NA, only for sample annotations)}
 
-\item{Age}{Numeric, the age to assign to new sample entries (default: NA, only for sample annotations)}
+\item{Age}{Numeric or numeric vector, the age(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
 \item{FullEthnicity}{Character, the full ethnicity to assign to new sample entries (default: NA, only for sample annotations)}
 
@@ -56,16 +56,20 @@ con <- connectDROMADatabase("path/to/droma.sqlite")
 # Check and harmonize sample names
 sample_mapping <- checkDROMASampleNames(colnames(my_data))
 
-# Update sample annotations
+# Update sample annotations with single age
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
                      data_type = "CellLine", tumor_type = "breast cancer",
                      Gender = "Female", Age = 45)
 
+# Update sample annotations with age vector
+updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+                     data_type = "CellLine", tumor_type = "breast cancer",
+                     Gender = "Female", Age = c(45, 52, 38, 41))
+
 # Check and harmonize drug names
 drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
 
-# Update drug annotations
-updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject",
-                     data_type = "CellLine")
+# Update drug annotations (data_type not used for drugs)
+updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
 }
 }
