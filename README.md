@@ -85,12 +85,12 @@ gCSI <- loadTreatmentResponse(gCSI, drugs = c("Tamoxifen", "Cisplatin"))
 # Cross-project molecular analysis
 mRNA_data <- loadMultiProjectMolecularProfiles(multi_set, 
                                               molecular_type = "mRNA",
-                                              overlap_only = FLASE)
+                                              overlap_only = FALSE)
 
 # Cross-project treatment response analysis
 drug_data <- loadMultiProjectTreatmentResponse(multi_set,
                                               drugs = c("Tamoxifen", "Cisplatin"),
-                                              overlap_only = FLASE)
+                                              overlap_only = FALSE)
 ```
 
 ## Core Classes
@@ -177,7 +177,7 @@ filtered_cross_data <- loadMultiProjectMolecularProfiles(multi_set,
                                                         molecular_type = "mRNA",
                                                         data_type = "CellLine",
                                                         tumor_type = "breast cancer",
-                                                        overlap_only = FLASE)
+                                                        overlap_only = FALSE)
 ```
 
 ### 3. Database Management
@@ -210,13 +210,13 @@ cat("Found", overlaps$overlap_count, "overlapping samples")
 mRNA_data <- loadMultiProjectMolecularProfiles(multi_set,
                                               molecular_type = "mRNA",
                                               features = c("BRCA1", "BRCA2"),
-                                              overlap_only = FLASE,
+                                              overlap_only = FALSE,
                                               data_type = "CellLine")
 
 # 4. Load drug response data for overlapping samples
 drug_data <- loadMultiProjectTreatmentResponse(multi_set,
                                               drugs = c("Tamoxifen", "Cisplatin"),
-                                              overlap_only = FLASE,
+                                              overlap_only = FALSE,
                                               data_type = "CellLine")
 
 # 5. Perform correlation analysis

@@ -562,7 +562,7 @@ setGeneric("loadMultiProjectTreatmentResponse", function(object, drugs = NULL, p
 
 #' @rdname loadMultiProjectTreatmentResponse
 #' @export
-setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object, drugs = NULL, projects = NULL, overlap_only = FLASE, data_type = "all", tumor_type = "all") {
+setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all") {
   if (is.null(projects)) {
     projects <- object@name
   }

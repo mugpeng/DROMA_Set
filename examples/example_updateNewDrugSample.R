@@ -6,6 +6,7 @@
 # Load required libraries
 library(DBI)
 library(RSQLite)
+library(DROMA.Set)
 
 # If you have the DROMA packages loaded:
 # library(DROMA.R)  # or source the functions directly
@@ -67,10 +68,19 @@ updateDROMAAnnotation(
   anno_type = "sample",
   name_mapping = sample_mapping,
   project_name = "MyNewProject",
-  data_type = "CellLine",  # or "PDX", "PDO", "PDC" as appropriate
-  # tumor_type = "mixed",    # or specific tumor type like "breast cancer"
+  data_type = "PDO",  # "CellLine", "PDX", "PDO", "PDC" as appropriate
+  tumor_type = "mixed",    # or specific tumor type like "breast cancer"
   connection = con
 )
+
+updateDROMAAnnotation("sample", sample_mapping,
+                      project_name = "MyProject3",
+                      data_type = "CellLine",
+                      tumor_type = "breast cancer",
+                      Gender = "Female",
+                      Age = 1888,
+                      FullEthnicity = "European",
+                      SimpleEthnicity = "Caucasian")
 
 ######################################
 # Example 2: Drug Name Harmonization

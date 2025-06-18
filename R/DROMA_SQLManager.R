@@ -1799,7 +1799,11 @@ checkDROMADrugNames <- function(drug_names, connection = NULL, max_distance = 0.
 #' @param name_mapping Data frame with name mappings (output from checkDROMASampleNames or checkDROMADrugNames)
 #' @param project_name Character, the project name to assign to new entries
 #' @param data_type Character, the data type to assign to new entries (e.g., "CellLine", "PDC", "PDX" for samples)
-#' @param tumor_type Character, the tumor type to assign to new sample entries (default: NA)
+#' @param tumor_type Character, the tumor type to assign to new sample entries (default: NA, only for sample annotations)
+#' @param Gender Character, the gender to assign to new sample entries (default: NA, only for sample annotations)
+#' @param Age Numeric, the age to assign to new sample entries (default: NA, only for sample annotations)
+#' @param FullEthnicity Character, the full ethnicity to assign to new sample entries (default: NA, only for sample annotations)
+#' @param SimpleEthnicity Character, the simple ethnicity to assign to new sample entries (default: NA, only for sample annotations)
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @return Invisibly returns TRUE if successful, along with a summary of changes
 #' @export
@@ -1813,7 +1817,8 @@ checkDROMADrugNames <- function(drug_names, connection = NULL, max_distance = 0.
 #'
 #' # Update sample annotations
 #' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
-#'                      data_type = "CellLine", tumor_type = "breast cancer")
+#'                      data_type = "CellLine", tumor_type = "breast cancer",
+#'                      Gender = "Female", Age = 45)
 #'
 #' # Check and harmonize drug names
 #' drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
@@ -1823,7 +1828,9 @@ checkDROMADrugNames <- function(drug_names, connection = NULL, max_distance = 0.
 #'                      data_type = "CellLine")
 #' }
 updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_type,
-                                 tumor_type = NA_character_, connection = NULL) {
+                                 tumor_type = NA_character_, Gender = NA_character_,
+                                 Age = NA_real_, FullEthnicity = NA_character_,
+                                 SimpleEthnicity = NA_character_, connection = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
   }
@@ -1831,6 +1838,11 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
   # Validate anno_type
   if (!anno_type %in% c("sample", "drug")) {
     stop("anno_type must be either 'sample' or 'drug'")
+  }
+
+  # Validate Age parameter - must be numeric when provided
+  if (!is.na(Age) && !is.numeric(Age)) {
+    stop("Age parameter must be numeric or NA")
   }
 
   # Validate name_mapping structure
@@ -1886,6 +1898,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
 
   # Initialize counters
   added_count <- 0
+  skipped_count <- 0
   current_index_num <- max_index_num
 
   # Process ALL entries from name_mapping - add each as a new entry
@@ -1893,6 +1906,19 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
     new_name <- name_mapping$new_name[i]
     original_name <- name_mapping$original_name[i]
     match_confidence <- name_mapping$match_confidence[i]
+
+    # Check if this SampleID/DrugName + ProjectID combination already exists
+    if (anno_type == "sample") {
+      existing_check <- which(existing_anno$SampleID == new_name & existing_anno$ProjectID == project_name)
+    } else {
+      existing_check <- which(existing_anno$DrugName == new_name & existing_anno$ProjectID == project_name)
+    }
+
+    if (length(existing_check) > 0) {
+      # Skip this entry as it already exists
+      skipped_count <- skipped_count + 1
+      next
+    }
 
     # Determine IndexID for this entry
     new_index_id <- NA_character_
@@ -1933,6 +1959,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
 
       if (length(original_entry_idx) > 0) {
         # Use existing entry info but update for this project
+        # For existing entries with IndexID, use original values; user parameters only for new samples
         original_entry <- existing_anno[original_entry_idx[1], ]
 
         if (anno_type == "sample") {
@@ -1946,7 +1973,8 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
             if("PatientID" %in% colnames(original_entry)) original_entry$PatientID else NA_character_,
             project_name,
             if("HarmonizedIdentifier" %in% colnames(original_entry)) original_entry$HarmonizedIdentifier else NA_character_,
-            if(!is.na(tumor_type)) tumor_type else (if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_),
+            # Use original values from existing annotation
+            if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_,
             if("MolecularSubtype" %in% colnames(original_entry)) original_entry$MolecularSubtype else NA_character_,
             if("Gender" %in% colnames(original_entry)) original_entry$Gender else NA_character_,
             if("Age" %in% colnames(original_entry)) original_entry$Age else NA_character_,
@@ -1954,7 +1982,8 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
             if("SimpleEthnicity" %in% colnames(original_entry)) original_entry$SimpleEthnicity else NA_character_,
             if("TNMstage" %in% colnames(original_entry)) original_entry$TNMstage else NA_character_,
             if("Primary_Metastasis" %in% colnames(original_entry)) original_entry$Primary_Metastasis else NA_character_,
-            data_type,
+            # Use original data_type from existing annotation
+            if("DataType" %in% colnames(original_entry)) original_entry$DataType else data_type,
             original_name,
             if("AlternateName" %in% colnames(original_entry)) original_entry$AlternateName else NA_character_,
             new_index_id
@@ -1972,14 +2001,15 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
             if("Clinical Phase" %in% colnames(original_entry)) original_entry$`Clinical Phase` else NA_character_,
             if("MOA" %in% colnames(original_entry)) original_entry$MOA else NA_character_,
             if("Targets" %in% colnames(original_entry)) original_entry$Targets else NA_character_,
-            data_type,
+            # Use original data_type from existing annotation
+            if("DataType" %in% colnames(original_entry)) original_entry$DataType else data_type,
             original_name,
             new_index_id
           ))
         }
         added_count <- added_count + 1
       } else {
-        # Couldn't find original entry, create new one
+        # Couldn't find original entry, create new one using user parameters
         if (anno_type == "sample") {
           insert_query <- paste0("INSERT INTO ", table_name, " (",
                                 "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
@@ -1988,7 +2018,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
           DBI::dbExecute(connection, insert_query, params = list(
             new_name, NA_character_, project_name, NA_character_, tumor_type,
-            NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+            NA_character_, Gender, if(is.na(Age)) NA_character_ else as.character(Age), FullEthnicity, SimpleEthnicity,
             NA_character_, NA_character_, data_type, original_name, NA_character_, new_index_id
           ))
         } else {
@@ -2004,7 +2034,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
         added_count <- added_count + 1
       }
     } else {
-      # For non-high confidence matches, create new entry with new_name as identifier and new IndexID
+      # For non-high confidence matches, create new entry with new_name as identifier using user parameters
       if (anno_type == "sample") {
         insert_query <- paste0("INSERT INTO ", table_name, " (",
                               "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
@@ -2013,7 +2043,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         DBI::dbExecute(connection, insert_query, params = list(
           new_name, NA_character_, project_name, NA_character_, tumor_type,
-          NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+          NA_character_, Gender, if(is.na(Age)) NA_character_ else as.character(Age), FullEthnicity, SimpleEthnicity,
           NA_character_, NA_character_, data_type, original_name, NA_character_, new_index_id
         ))
       } else {
@@ -2033,6 +2063,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
   # Print summary
   message("Updated ", table_name, " table:")
   message("  Added: ", added_count, " new entries")
+  message("  Skipped: ", skipped_count, " existing entries")
   if (current_index_num > max_index_num) {
     message("  Generated new IndexIDs from ", index_prefix, max_index_num + 1, " to ", index_prefix, current_index_num)
   }
@@ -2042,6 +2073,13 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
   message("  Match types for processed entries:")
   for (match_type in names(match_summary)) {
     message("    ", match_type, ": ", match_summary[match_type])
+  }
+
+  # Additional note about sample-specific parameters
+  if (anno_type == "sample" && (added_count > 0)) {
+    message("  Note: For samples with existing IndexID, original annotation values were preserved.")
+    message("        User-provided parameters (tumor_type, Gender, Age, FullEthnicity, SimpleEthnicity)")
+    message("        were only applied to new sample entries without existing records.")
   }
 
   invisible(TRUE)

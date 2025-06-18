@@ -10,6 +10,10 @@ updateDROMAAnnotation(
   project_name,
   data_type,
   tumor_type = NA_character_,
+  Gender = NA_character_,
+  Age = NA_real_,
+  FullEthnicity = NA_character_,
+  SimpleEthnicity = NA_character_,
   connection = NULL
 )
 }
@@ -22,7 +26,15 @@ updateDROMAAnnotation(
 
 \item{data_type}{Character, the data type to assign to new entries (e.g., "CellLine", "PDC", "PDX" for samples)}
 
-\item{tumor_type}{Character, the tumor type to assign to new sample entries (default: NA)}
+\item{tumor_type}{Character, the tumor type to assign to new sample entries (default: NA, only for sample annotations)}
+
+\item{Gender}{Character, the gender to assign to new sample entries (default: NA, only for sample annotations)}
+
+\item{Age}{Numeric, the age to assign to new sample entries (default: NA, only for sample annotations)}
+
+\item{FullEthnicity}{Character, the full ethnicity to assign to new sample entries (default: NA, only for sample annotations)}
+
+\item{SimpleEthnicity}{Character, the simple ethnicity to assign to new sample entries (default: NA, only for sample annotations)}
 
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 }
@@ -46,7 +58,8 @@ sample_mapping <- checkDROMASampleNames(colnames(my_data))
 
 # Update sample annotations
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
-                     data_type = "CellLine", tumor_type = "breast cancer")
+                     data_type = "CellLine", tumor_type = "breast cancer",
+                     Gender = "Female", Age = 45)
 
 # Check and harmonize drug names
 drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
