@@ -297,6 +297,16 @@ This project is licensed under the MPL-2 License - see the [LICENSE](LICENSE) fi
 - 📖 **Documentation**: [Package Documentation](https://mugpeng.github.io/DROMA_Set/)
 
 ## Changelog
+### Version 0.4.4
+Refactor updateDROMADatabase and updateDROMAProjects functions to improve project tracking and metadata handling; enhance listDROMADatabaseTables to filter out backup tables and include created/updated dates; update documentation for new parameters in updateDROMAAnnotation function to support vector inputs for age, data type, and other attributes.
+
+Enhancements Made:
+✅ Removed projects table auto-updates from updateDROMADatabase
+✅ Added _mutation_raw table exclusion across all relevant functions
+✅ Added dataset_type parameter to updateDROMAProjects
+✅ Enhanced updateDROMAAnnotation with vector support and created_date logic
+✅ Improved parameter validation and documentation
+
 ### Version 0.4.3
 Add updateDROMAProjects function to manage project metadata in DROMA database; enhance listDROMADatabaseTables with feature and sample counts; minor adjustments in example script.
 
