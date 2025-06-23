@@ -28,8 +28,7 @@ A data frame with columns: original_name, cleaned_name, harmonized_name, match_t
 }
 \description{
 Checks drug names (row names) against the drug_anno table in the DROMA database
-and provides harmonized mappings. Uses fuzzy matching and name cleaning similar to the approach
-in 02-harmonized_name.Rmd.
+and provides harmonized mappings. Uses fuzzy matching and name cleaning approach.
 }
 \examples{
 \dontrun{

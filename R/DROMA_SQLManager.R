@@ -297,8 +297,8 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
 
   # Filter to only omics and drug tables, excluding system tables and backups
   tables <- all_tables[!all_tables %in% c("sample_anno", "drug_anno", "projects", "droma_metadata", "search_vectors")]
-  # Remove backup tables like "_mutation_raw"
-  tables <- tables[!grepl("_mutation_raw$", tables)]
+  # Remove backup tables like "_raw"
+  tables <- tables[!grepl("_raw$", tables)]
   # Only keep tables that follow the pattern "project_datatype"
   tables <- tables[grepl("^[^_]+_[^_]+", tables)]
 
@@ -429,7 +429,7 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
     parts <- strsplit(t, "_")[[1]]
     if (length(parts) >= 2 &&
         !t %in% c("sample_anno", "drug_anno") &&
-        !grepl("_mutation_raw$", t)) {
+        !grepl("_raw$", t)) {
       return(parts[1])
     } else {
       return(NA)
@@ -455,8 +455,8 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
     if (project_data_types %in% project_names) {
       # Get all tables for this project, excluding backup tables
       project_tables <- grep(paste0("^", project_data_types, "_"), tables, value = TRUE)
-      # Remove backup tables like "_mutation_raw"
-      project_tables <- project_tables[!grepl("_mutation_raw$", project_tables)]
+      # Remove backup tables like "_raw"
+      project_tables <- project_tables[!grepl("_raw$", project_tables)]
       # Extract data types from table names
       data_types <- unique(sapply(project_tables, function(t) {
         sub(paste0("^", project_data_types, "_"), "", t)
@@ -475,6 +475,239 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
   )
 
   return(result)
+}
+
+
+#' Update DROMA Projects Metadata
+#'
+#' @description Updates or adds project metadata to the projects table in the DROMA database.
+#' This function automatically detects project information from existing tables and updates
+#' the projects table accordingly. If a project already exists, it updates the metadata;
+#' if it's new, it adds a new entry.
+#'
+#' @param project_name Character, the name of the project to update (e.g., "gCSI", "CCLE").
+#'   If NULL, updates all projects found in the database.
+#' @param dataset_type Character, the dataset type to assign to the project(s) (e.g., "CellLine", "PDX", "PDO").
+#'   If NULL, attempts to guess from sample_anno table (default: NULL)
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @param create_table Logical, whether to create the projects table if it doesn't exist (default: TRUE)
+#' @return Invisibly returns TRUE if successful
+#' @export
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # Add some data tables first
+#' updateDROMADatabase(expr_data, "gCSI_mRNA", overwrite = TRUE)
+#' updateDROMADatabase(cnv_data, "gCSI_cnv", overwrite = TRUE)
+#'
+#' # Update project metadata for gCSI with specific dataset type
+#' updateDROMAProjects("gCSI", dataset_type = "CellLine")
+#'
+#' # Update all projects in the database (auto-detect dataset type)
+#' updateDROMAProjects()
+#' }
+updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connection = NULL, create_table = TRUE) {
+  if (!requireNamespace("DBI", quietly = TRUE) ||
+      !requireNamespace("RSQLite", quietly = TRUE)) {
+    stop("Packages 'DBI' and 'RSQLite' are required. Please install them with install.packages(c('DBI', 'RSQLite'))")
+  }
+
+  # Get connection from global environment if not provided
+  if (is.null(connection)) {
+    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
+      stop("No database connection found. Connect first with connectDROMADatabase()")
+    }
+    connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  # Get all tables in the database
+  all_tables <- DBI::dbListTables(connection)
+
+  # Extract project names from table names
+  if (is.null(project_name)) {
+    # Get all project names from tables, excluding backup tables
+    project_names <- unique(sapply(all_tables, function(t) {
+      parts <- strsplit(t, "_")[[1]]
+      # Exclude system tables and backup tables (like "_raw")
+      if (length(parts) >= 2 &&
+          !t %in% c("sample_anno", "drug_anno", "search_vectors", "projects", "droma_metadata") &&
+          !grepl("_raw$", t)) {
+        return(parts[1])
+      } else {
+        return(NA)
+      }
+    }))
+    project_names <- project_names[!is.na(project_names)]
+  } else {
+    # Use specified project name
+    project_names <- project_name
+  }
+
+  if (length(project_names) == 0) {
+    message("No projects found in database")
+    return(invisible(FALSE))
+  }
+
+  # Check if projects table exists, create if needed
+  if (!"projects" %in% all_tables) {
+    if (create_table) {
+      # Create projects table
+      create_projects_query <- "
+        CREATE TABLE projects (
+          project_name TEXT PRIMARY KEY,
+          dataset_type TEXT,
+          data_types TEXT,
+          sample_count INTEGER,
+          drug_count INTEGER,
+          created_date TEXT,
+          updated_date TEXT
+        )"
+      DBI::dbExecute(connection, create_projects_query)
+      message("Created projects table")
+    } else {
+      stop("Projects table does not exist. Set create_table = TRUE to create it.")
+    }
+  }
+
+  # Get existing projects data
+  existing_projects <- DBI::dbReadTable(connection, "projects")
+
+  # Process each project
+  updated_count <- 0
+  added_count <- 0
+
+  for (proj in project_names) {
+    # Get tables for this project, excluding backup tables
+    project_tables <- grep(paste0("^", proj, "_"), all_tables, value = TRUE)
+    # Remove backup tables like "_raw"
+    project_tables <- project_tables[!grepl("_raw$", project_tables)]
+
+    if (length(project_tables) == 0) {
+      warning("No tables found for project '", proj, "'")
+      next
+    }
+
+    # Extract data types from table names
+    data_types <- unique(sapply(project_tables, function(t) {
+      sub(paste0("^", proj, "_"), "", t)
+    }))
+
+    # Determine dataset type - use user-provided or guess from sample_anno
+    current_dataset_type <- dataset_type  # Use user-provided dataset_type
+    sample_count <- 0
+
+    if ("sample_anno" %in% all_tables) {
+      # Get sample IDs for this project from all project tables
+      sample_ids <- c()
+
+      for (table in project_tables) {
+        tryCatch({
+          # Get column names from the table
+          columns_query <- paste0("PRAGMA table_info(", table, ")")
+          columns_info <- DBI::dbGetQuery(connection, columns_query)
+          table_columns <- columns_info$name[columns_info$name != "feature_id"]
+
+          if (length(table_columns) > 0) {
+            sample_ids <- c(sample_ids, table_columns)
+          }
+        }, error = function(e) {
+          # Skip tables that can't be processed
+        })
+      }
+
+      sample_ids <- unique(sample_ids)
+      sample_count <- length(sample_ids)
+
+      # If dataset_type is NULL, try to guess from sample_anno
+      if (is.null(current_dataset_type) && length(sample_ids) > 0) {
+        tryCatch({
+          # Use parameterized query to avoid SQL injection
+          placeholders <- paste(rep("?", length(sample_ids)), collapse = ",")
+          types_query <- paste0(
+            "SELECT DISTINCT DataType FROM sample_anno WHERE SampleID IN (",
+            placeholders, ") AND ProjectID = ?"
+          )
+          params <- c(as.list(sample_ids), proj)
+          types_result <- DBI::dbGetQuery(connection, types_query, params = params)
+
+          if (nrow(types_result) > 0) {
+            current_dataset_type <- types_result$DataType[1]
+          }
+        }, error = function(e) {
+          # If sample_anno query fails, continue without dataset type
+        })
+      }
+    }
+
+    # Convert to NA_character_ if still NULL
+    if (is.null(current_dataset_type)) {
+      current_dataset_type <- NA_character_
+    }
+
+    # Count drugs in drug table if available
+    drug_count <- 0
+    drug_table <- paste0(proj, "_drug")
+    if (drug_table %in% all_tables) {
+      tryCatch({
+        drug_count_query <- paste0("SELECT COUNT(*) as count FROM ", drug_table)
+        drug_count_result <- DBI::dbGetQuery(connection, drug_count_query)
+        drug_count <- drug_count_result$count[1]
+      }, error = function(e) {
+        # If drug count query fails, keep drug_count as 0
+      })
+    }
+
+    # Prepare project metadata
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    data_types_str <- paste(sort(data_types), collapse = ",")
+
+    # Check if project already exists
+    if (proj %in% existing_projects$project_name) {
+      # Update existing project
+      update_query <- "
+        UPDATE projects SET
+          dataset_type = ?,
+          data_types = ?,
+          sample_count = ?,
+          drug_count = ?,
+          updated_date = ?
+        WHERE project_name = ?"
+
+      DBI::dbExecute(connection, update_query, params = list(
+        current_dataset_type, data_types_str, sample_count, drug_count, current_time, proj
+      ))
+
+      message("Updated project '", proj, "' with ", length(data_types), " data types (",
+              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
+      updated_count <- updated_count + 1
+
+    } else {
+      # Add new project
+      insert_query <- "
+        INSERT INTO projects (project_name, dataset_type, data_types, sample_count, drug_count, created_date, updated_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)"
+
+      DBI::dbExecute(connection, insert_query, params = list(
+        proj, current_dataset_type, data_types_str, sample_count, drug_count, current_time, current_time
+      ))
+
+      message("Added new project '", proj, "' with ", length(data_types), " data types (",
+              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
+      added_count <- added_count + 1
+    }
+  }
+
+  # Summary message
+  if (added_count > 0 || updated_count > 0) {
+    message("Project metadata update complete: ", added_count, " projects added, ",
+            updated_count, " projects updated")
+  } else {
+    message("No projects were added or updated")
+  }
+
+  invisible(TRUE)
 }
 
 #' List Available Features in DROMA Database
@@ -1122,40 +1355,134 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
   })
 }
 
-#' Update DROMA Projects Metadata
+#' Update DROMA Annotation Tables with New Names
 #'
-#' @description Updates or adds project metadata to the projects table in the DROMA database.
-#' This function automatically detects project information from existing tables and updates
-#' the projects table accordingly. If a project already exists, it updates the metadata;
-#' if it's new, it adds a new entry.
+#' @description Adds harmonized sample or drug names to the corresponding annotation tables.
+#' Processes all entries from the name_mapping dataframe. For high confidence matches,
+#' uses existing annotation information when available. Creates new entries with new_name
+#' as the primary identifier and original_name recorded in ProjectRawName. Updates existing
+#' entries if they already exist in the database.
 #'
-#' @param project_name Character, the name of the project to update (e.g., "gCSI", "CCLE").
-#'   If NULL, updates all projects found in the database.
-#' @param dataset_type Character, the dataset type to assign to the project(s) (e.g., "CellLine", "PDX", "PDO").
-#'   If NULL, attempts to guess from sample_anno table (default: NULL)
+#' @param anno_type Character, type of annotation to update: "sample" or "drug"
+#' @param name_mapping Data frame with name mappings containing at minimum: original_name, new_name, match_confidence columns
+#' @param project_name Character, the project name to assign to new entries
+#' @param data_type Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)
+#' @param tumor_type Character or character vector, the tumor type(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
+#' @param PatientID Character or character vector, the patient ID(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
+#' @param Gender Character or character vector, the gender(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
+#' @param Age Numeric or numeric vector, the age(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
+#' @param FullEthnicity Character or character vector, the full ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
+#' @param SimpleEthnicity Character or character vector, the simple ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
 #' @param connection Optional database connection object. If NULL, uses global connection
-#' @param create_table Logical, whether to create the projects table if it doesn't exist (default: TRUE)
-#' @return Invisibly returns TRUE if successful
+#' @return Invisibly returns TRUE if successful, along with a summary of changes
 #' @export
 #' @examples
 #' \dontrun{
 #' # Connect to database
 #' con <- connectDROMADatabase("path/to/droma.sqlite")
 #'
-#' # Add some data tables first
-#' updateDROMADatabase(expr_data, "gCSI_mRNA", overwrite = TRUE)
-#' updateDROMADatabase(cnv_data, "gCSI_cnv", overwrite = TRUE)
+#' # Check and harmonize sample names
+#' sample_mapping <- checkDROMASampleNames(colnames(my_data))
 #'
-#' # Update project metadata for gCSI with specific dataset type
-#' updateDROMAProjects("gCSI", dataset_type = "CellLine")
+#' # Update sample annotations with single values
+#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+#'                      data_type = "CellLine", tumor_type = "breast cancer",
+#'                      PatientID = "Patient_001", Gender = "Female", Age = 45)
 #'
-#' # Update all projects in the database (auto-detect dataset type)
-#' updateDROMAProjects()
+#' # Update sample annotations with vectors (one value per sample)
+#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+#'                      data_type = c("CellLine", "PDX", "CellLine", "PDO"),
+#'                      tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
+#'                      PatientID = c("Patient_001", "Patient_002", "Patient_003", "Patient_004"),
+#'                      Gender = c("Female", "Male", "Female", "Male"),
+#'                      Age = c(45, 52, 38, 41),
+#'                      FullEthnicity = c("European", "Asian", "African", "Hispanic"),
+#'                      SimpleEthnicity = c("Caucasian", "Asian", "African", "Hispanic"))
+#'
+#' # Check and harmonize drug names
+#' drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
+#'
+#' # Update drug annotations (PatientID not used for drugs)
+#' updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
 #' }
-updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connection = NULL, create_table = TRUE) {
-  if (!requireNamespace("DBI", quietly = TRUE) ||
-      !requireNamespace("RSQLite", quietly = TRUE)) {
-    stop("Packages 'DBI' and 'RSQLite' are required. Please install them with install.packages(c('DBI', 'RSQLite'))")
+updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_type = NA_character_,
+                                  tumor_type = NA_character_, PatientID = NA_character_, Gender = NA_character_,
+                                  Age = NA_real_, FullEthnicity = NA_character_,
+                                  SimpleEthnicity = NA_character_, connection = NULL) {
+  if (!requireNamespace("DBI", quietly = TRUE)) {
+    stop("Package 'DBI' is required. Please install with install.packages('DBI')")
+  }
+
+  # Validate anno_type
+  if (!anno_type %in% c("sample", "drug")) {
+    stop("anno_type must be either 'sample' or 'drug'")
+  }
+
+  # Validate Age parameter - must be numeric when provided
+  if (!all(is.na(Age)) && !is.numeric(Age)) {
+    stop("Age parameter must be numeric (single value or vector) or NA")
+  }
+
+  # If Age is a vector, validate length
+  if (length(Age) > 1 && length(Age) != nrow(name_mapping)) {
+    stop("Age vector length (", length(Age), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+  }
+
+  # Validate character parameters for sample annotations
+  if (anno_type == "sample") {
+    # Validate data_type parameter
+    if (!all(is.na(data_type)) && !is.character(data_type)) {
+      stop("data_type parameter must be character (single value or vector) or NA")
+    }
+    if (length(data_type) > 1 && length(data_type) != nrow(name_mapping)) {
+      stop("data_type vector length (", length(data_type), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+
+    # Validate tumor_type parameter
+    if (!all(is.na(tumor_type)) && !is.character(tumor_type)) {
+      stop("tumor_type parameter must be character (single value or vector) or NA")
+    }
+    if (length(tumor_type) > 1 && length(tumor_type) != nrow(name_mapping)) {
+      stop("tumor_type vector length (", length(tumor_type), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+
+    # Validate PatientID parameter
+    if (!all(is.na(PatientID)) && !is.character(PatientID)) {
+      stop("PatientID parameter must be character (single value or vector) or NA")
+    }
+    if (length(PatientID) > 1 && length(PatientID) != nrow(name_mapping)) {
+      stop("PatientID vector length (", length(PatientID), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+
+    # Validate Gender parameter
+    if (!all(is.na(Gender)) && !is.character(Gender)) {
+      stop("Gender parameter must be character (single value or vector) or NA")
+    }
+    if (length(Gender) > 1 && length(Gender) != nrow(name_mapping)) {
+      stop("Gender vector length (", length(Gender), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+
+    # Validate FullEthnicity parameter
+    if (!all(is.na(FullEthnicity)) && !is.character(FullEthnicity)) {
+      stop("FullEthnicity parameter must be character (single value or vector) or NA")
+    }
+    if (length(FullEthnicity) > 1 && length(FullEthnicity) != nrow(name_mapping)) {
+      stop("FullEthnicity vector length (", length(FullEthnicity), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+
+    # Validate SimpleEthnicity parameter
+    if (!all(is.na(SimpleEthnicity)) && !is.character(SimpleEthnicity)) {
+      stop("SimpleEthnicity parameter must be character (single value or vector) or NA")
+    }
+    if (length(SimpleEthnicity) > 1 && length(SimpleEthnicity) != nrow(name_mapping)) {
+      stop("SimpleEthnicity vector length (", length(SimpleEthnicity), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
+    }
+  }
+
+  # Validate name_mapping structure
+  required_cols <- c("original_name", "new_name", "match_confidence")
+  if (!all(required_cols %in% colnames(name_mapping))) {
+    stop("name_mapping must contain columns: ", paste(required_cols, collapse = ", "))
   }
 
   # Get connection from global environment if not provided
@@ -1166,199 +1493,270 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
     connection <- get("droma_db_connection", envir = .GlobalEnv)
   }
 
-  # Get all tables in the database
-  all_tables <- DBI::dbListTables(connection)
-
-  # Extract project names from table names
-  if (is.null(project_name)) {
-    # Get all project names from tables, excluding backup tables
-    project_names <- unique(sapply(all_tables, function(t) {
-      parts <- strsplit(t, "_")[[1]]
-      # Exclude system tables and backup tables (like "_mutation_raw")
-      if (length(parts) >= 2 &&
-          !t %in% c("sample_anno", "drug_anno", "search_vectors", "projects", "droma_metadata") &&
-          !grepl("_mutation_raw$", t)) {
-        return(parts[1])
-      } else {
-        return(NA)
-      }
-    }))
-    project_names <- project_names[!is.na(project_names)]
+  # Determine table name and column names
+  if (anno_type == "sample") {
+    table_name <- "sample_anno"
+    id_column <- "SampleID"
+    raw_column <- "ProjectRawName"
+    index_prefix <- "UM_SAMPLE_"
   } else {
-    # Use specified project name
-    project_names <- project_name
+    table_name <- "drug_anno"
+    id_column <- "DrugName"
+    raw_column <- "ProjectRawName"
+    index_prefix <- "UM_DRUG_"
   }
 
-  if (length(project_names) == 0) {
-    message("No projects found in database")
-    return(invisible(FALSE))
+  # Check if table exists
+  all_tables <- DBI::dbListTables(connection)
+  if (!table_name %in% all_tables) {
+    stop("Annotation table '", table_name, "' not found in database")
   }
 
-  # Check if projects table exists, create if needed
-  if (!"projects" %in% all_tables) {
-    if (create_table) {
-      # Create projects table
-      create_projects_query <- "
-        CREATE TABLE projects (
-          project_name TEXT PRIMARY KEY,
-          dataset_type TEXT,
-          data_types TEXT,
-          sample_count INTEGER,
-          drug_count INTEGER,
-          created_date TEXT,
-          updated_date TEXT
-        )"
-      DBI::dbExecute(connection, create_projects_query)
-      message("Created projects table")
-    } else {
-      stop("Projects table does not exist. Set create_table = TRUE to create it.")
+  # Get existing annotation data
+  existing_anno <- DBI::dbReadTable(connection, table_name)
+
+  # Find the maximum IndexID number for generating new IDs
+  max_index_num <- 0
+  if ("IndexID" %in% colnames(existing_anno) && nrow(existing_anno) > 0) {
+    # Extract numbers from IndexID column
+    index_ids <- existing_anno$IndexID[!is.na(existing_anno$IndexID)]
+    if (length(index_ids) > 0) {
+      # Extract numbers from IndexID strings like "UM_SAMPLE_1" or "UM_DRUG_2077"
+      numbers <- as.numeric(gsub(paste0("^", index_prefix), "", index_ids))
+      numbers <- numbers[!is.na(numbers)]
+      if (length(numbers) > 0) {
+        max_index_num <- max(numbers)
+      }
     }
   }
 
-  # Get existing projects data
-  existing_projects <- DBI::dbReadTable(connection, "projects")
-
-  # Process each project
-  updated_count <- 0
+  # Initialize counters
   added_count <- 0
+  skipped_count <- 0
+  current_index_num <- max_index_num
 
-  for (proj in project_names) {
-    # Get tables for this project, excluding backup tables
-    project_tables <- grep(paste0("^", proj, "_"), all_tables, value = TRUE)
-    # Remove backup tables like "_mutation_raw"
-    project_tables <- project_tables[!grepl("_mutation_raw$", project_tables)]
+  # Process ALL entries from name_mapping - add each as a new entry
+  for (i in 1:nrow(name_mapping)) {
+    new_name <- name_mapping$new_name[i]
+    original_name <- name_mapping$original_name[i]
+    match_confidence <- name_mapping$match_confidence[i]
 
-    if (length(project_tables) == 0) {
-      warning("No tables found for project '", proj, "'")
+    # Get current parameter values (handle both single values and vectors)
+    current_age <- if (length(Age) == 1) Age else Age[i]
+    current_data_type <- if (length(data_type) == 1) data_type else data_type[i]
+    current_tumor_type <- if (length(tumor_type) == 1) tumor_type else tumor_type[i]
+    current_patient_id <- if (length(PatientID) == 1) PatientID else PatientID[i]
+    current_gender <- if (length(Gender) == 1) Gender else Gender[i]
+    current_full_ethnicity <- if (length(FullEthnicity) == 1) FullEthnicity else FullEthnicity[i]
+    current_simple_ethnicity <- if (length(SimpleEthnicity) == 1) SimpleEthnicity else SimpleEthnicity[i]
+
+    # Check if this SampleID/DrugName + ProjectID combination already exists
+    if (anno_type == "sample") {
+      existing_check <- which(existing_anno$SampleID == new_name & existing_anno$ProjectID == project_name)
+    } else {
+      existing_check <- which(existing_anno$DrugName == new_name & existing_anno$ProjectID == project_name)
+    }
+
+    if (length(existing_check) > 0) {
+      # Skip this entry as it already exists
+      skipped_count <- skipped_count + 1
       next
     }
 
-    # Extract data types from table names
-    data_types <- unique(sapply(project_tables, function(t) {
-      sub(paste0("^", proj, "_"), "", t)
-    }))
-
-    # Determine dataset type - use user-provided or guess from sample_anno
-    current_dataset_type <- dataset_type  # Use user-provided dataset_type
-    sample_count <- 0
-
-    if ("sample_anno" %in% all_tables) {
-      # Get sample IDs for this project from all project tables
-      sample_ids <- c()
-
-      for (table in project_tables) {
-        tryCatch({
-          # Get column names from the table
-          columns_query <- paste0("PRAGMA table_info(", table, ")")
-          columns_info <- DBI::dbGetQuery(connection, columns_query)
-          table_columns <- columns_info$name[columns_info$name != "feature_id"]
-
-          if (length(table_columns) > 0) {
-            sample_ids <- c(sample_ids, table_columns)
-          }
-        }, error = function(e) {
-          # Skip tables that can't be processed
-        })
+    # Determine IndexID for this entry
+    new_index_id <- NA_character_
+    if (match_confidence == "high") {
+      # For high confidence matches, try to use existing IndexID if available
+      if (anno_type == "sample") {
+        original_entry_idx <- which(existing_anno$SampleID == new_name |
+                                      existing_anno$ProjectRawName == new_name)
+      } else {
+        original_entry_idx <- which(existing_anno$DrugName == new_name |
+                                      existing_anno$ProjectRawName == new_name)
       }
 
-      sample_ids <- unique(sample_ids)
-      sample_count <- length(sample_ids)
-
-      # If dataset_type is NULL, try to guess from sample_anno
-      if (is.null(current_dataset_type) && length(sample_ids) > 0) {
-        tryCatch({
-          # Use parameterized query to avoid SQL injection
-          placeholders <- paste(rep("?", length(sample_ids)), collapse = ",")
-          types_query <- paste0(
-            "SELECT DISTINCT DataType FROM sample_anno WHERE SampleID IN (",
-            placeholders, ") AND ProjectID = ?"
-          )
-          params <- c(as.list(sample_ids), proj)
-          types_result <- DBI::dbGetQuery(connection, types_query, params = params)
-
-          if (nrow(types_result) > 0) {
-            current_dataset_type <- types_result$DataType[1]
-          }
-        }, error = function(e) {
-          # If sample_anno query fails, continue without dataset type
-        })
+      if (length(original_entry_idx) > 0) {
+        original_entry <- existing_anno[original_entry_idx[1], ]
+        if ("IndexID" %in% colnames(original_entry) && !is.na(original_entry$IndexID)) {
+          new_index_id <- original_entry$IndexID
+        }
       }
     }
 
-    # Convert to NA_character_ if still NULL
-    if (is.null(current_dataset_type)) {
-      current_dataset_type <- NA_character_
+    # If no existing IndexID found (or not high confidence), generate new one
+    if (is.na(new_index_id)) {
+      current_index_num <- current_index_num + 1
+      new_index_id <- paste0(index_prefix, current_index_num)
     }
 
-    # Count drugs in drug table if available
-    drug_count <- 0
-    drug_table <- paste0(proj, "_drug")
-    if (drug_table %in% all_tables) {
-      tryCatch({
-        drug_count_query <- paste0("SELECT COUNT(*) as count FROM ", drug_table)
-        drug_count_result <- DBI::dbGetQuery(connection, drug_count_query)
-        drug_count <- drug_count_result$count[1]
-      }, error = function(e) {
-        # If drug count query fails, keep drug_count as 0
-      })
-    }
+    # Add new entry - behavior depends on match_confidence
+    if (match_confidence == "high") {
+      # For high confidence matches, check if we can find existing info from the harmonized name
+      if (anno_type == "sample") {
+        original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
+                                      existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      } else {
+        original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
+                                      existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+      }
 
-    # Prepare project metadata
-    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    data_types_str <- paste(sort(data_types), collapse = ",")
+      if (length(original_entry_idx) > 0) {
+        # Use existing entry info but update for this project
+        # For existing entries with IndexID, use original values; user parameters only for new samples
+        original_entry <- existing_anno[original_entry_idx[1], ]
 
-    # Check if project already exists
-    if (proj %in% existing_projects$project_name) {
-      # Update existing project
-      update_query <- "
-        UPDATE projects SET
-          dataset_type = ?,
-          data_types = ?,
-          sample_count = ?,
-          drug_count = ?,
-          updated_date = ?
-        WHERE project_name = ?"
-
-      DBI::dbExecute(connection, update_query, params = list(
-        current_dataset_type, data_types_str, sample_count, drug_count, current_time, proj
-      ))
-
-      message("Updated project '", proj, "' with ", length(data_types), " data types (",
-              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
-      updated_count <- updated_count + 1
-
+        if (anno_type == "sample") {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                 "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                                 "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                                 "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name,
+            if("PatientID" %in% colnames(original_entry)) original_entry$PatientID else current_patient_id,
+            project_name,
+            if("HarmonizedIdentifier" %in% colnames(original_entry)) original_entry$HarmonizedIdentifier else NA_character_,
+            # Use original values from existing annotation
+            if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_,
+            if("MolecularSubtype" %in% colnames(original_entry)) original_entry$MolecularSubtype else NA_character_,
+            if("Gender" %in% colnames(original_entry)) original_entry$Gender else NA_character_,
+            if("Age" %in% colnames(original_entry)) original_entry$Age else NA_character_,
+            if("FullEthnicity" %in% colnames(original_entry)) original_entry$FullEthnicity else NA_character_,
+            if("SimpleEthnicity" %in% colnames(original_entry)) original_entry$SimpleEthnicity else NA_character_,
+            if("TNMstage" %in% colnames(original_entry)) original_entry$TNMstage else NA_character_,
+            if("Primary_Metastasis" %in% colnames(original_entry)) original_entry$Primary_Metastasis else NA_character_,
+            # Use original data_type from existing annotation
+            if("DataType" %in% colnames(original_entry)) original_entry$DataType else current_data_type,
+            original_name,
+            if("AlternateName" %in% colnames(original_entry)) original_entry$AlternateName else NA_character_,
+            new_index_id
+          ))
     } else {
-      # Add new project
-      insert_query <- "
-        INSERT INTO projects (project_name, dataset_type, data_types, sample_count, drug_count, created_date, updated_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?)"
-
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                 "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                                 "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
+                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
       DBI::dbExecute(connection, insert_query, params = list(
-        proj, current_dataset_type, data_types_str, sample_count, drug_count, current_time, current_time
-      ))
-
-      message("Added new project '", proj, "' with ", length(data_types), " data types (",
-              data_types_str, "), ", sample_count, " samples, ", drug_count, " drugs")
+            new_name,
+            project_name,
+            if("Harmonized ID (Pubchem ID)" %in% colnames(original_entry)) original_entry$`Harmonized ID (Pubchem ID)` else NA_character_,
+            if("Source for Clinical Information" %in% colnames(original_entry)) original_entry$`Source for Clinical Information` else NA_character_,
+            if("Clinical Phase" %in% colnames(original_entry)) original_entry$`Clinical Phase` else NA_character_,
+            if("MOA" %in% colnames(original_entry)) original_entry$MOA else NA_character_,
+            if("Targets" %in% colnames(original_entry)) original_entry$Targets else NA_character_,
+            original_name,
+            new_index_id
+          ))
+        }
+      added_count <- added_count + 1
+      } else {
+        # Couldn't find original entry, create new one using user parameters
+        if (anno_type == "sample") {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                 "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                                 "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                                 "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                  DBI::dbExecute(connection, insert_query, params = list(
+          new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
+          NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
+          NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
+        ))
+        } else {
+          insert_query <- paste0("INSERT INTO ", table_name, " (",
+                                 "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                                 "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
+                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          DBI::dbExecute(connection, insert_query, params = list(
+            new_name, project_name, NA_character_, NA_character_,
+            NA_character_, NA_character_, NA_character_, original_name, new_index_id
+          ))
+        }
+        added_count <- added_count + 1
+      }
+  } else {
+      # For non-high confidence matches, create new entry with new_name as identifier using user parameters
+      if (anno_type == "sample") {
+        insert_query <- paste0("INSERT INTO ", table_name, " (",
+                               "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
+                               "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
+                               "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
+                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        DBI::dbExecute(connection, insert_query, params = list(
+          new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
+          NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
+          NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
+        ))
+      } else {
+        insert_query <- paste0("INSERT INTO ", table_name, " (",
+                               "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
+                               "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
+                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        DBI::dbExecute(connection, insert_query, params = list(
+          new_name, project_name, NA_character_, NA_character_,
+          NA_character_, NA_character_, NA_character_, original_name, new_index_id
+        ))
+      }
       added_count <- added_count + 1
     }
   }
 
-  # Summary message
-  if (added_count > 0 || updated_count > 0) {
-    message("Project metadata update complete: ", added_count, " projects added, ",
-            updated_count, " projects updated")
+  # Update created_date if it's NA for this project
+  if (added_count > 0) {
+    all_tables <- DBI::dbListTables(connection)
+    if ("projects" %in% all_tables) {
+      # Check if project exists and has NA created_date
+      check_query <- "SELECT created_date FROM projects WHERE project_name = ?"
+      existing_project <- DBI::dbGetQuery(connection, check_query, params = list(project_name))
+
+      if (nrow(existing_project) > 0 && is.na(existing_project$created_date[1])) {
+        # Update created_date to current time
+        current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+        update_query <- "UPDATE projects SET created_date = ? WHERE project_name = ?"
+        DBI::dbExecute(connection, update_query, params = list(current_time, project_name))
+        message("  Updated created_date for project '", project_name, "' to ", current_time)
+      }
+    }
+  }
+
+  # Print summary
+  message("Updated ", table_name, " table:")
+  message("  Added: ", added_count, " new entries")
+  message("  Skipped: ", skipped_count, " existing entries")
+  if (current_index_num > max_index_num) {
+    message("  Generated new IndexIDs from ", index_prefix, max_index_num + 1, " to ", index_prefix, current_index_num)
+  }
+
+  # Print match confidence summary for all entries
+  if ("match_type" %in% colnames(name_mapping)) {
+    match_summary <- table(name_mapping$match_type)
+    message("  Match types for processed entries:")
+    for (match_type in names(match_summary)) {
+      message("    ", match_type, ": ", match_summary[match_type])
+    }
   } else {
-    message("No projects were added or updated")
+    confidence_summary <- table(name_mapping$match_confidence)
+    message("  Match confidence for processed entries:")
+    for (confidence in names(confidence_summary)) {
+      message("    ", confidence, ": ", confidence_summary[confidence])
+    }
+  }
+
+  # Additional note about sample-specific parameters
+  if (anno_type == "sample" && (added_count > 0)) {
+    message("  Note: For samples with existing IndexID, original annotation values were preserved.")
+    message("        User-provided parameters (PatientID, tumor_type, Gender, Age, FullEthnicity, SimpleEthnicity)")
+    message("        were only applied to new sample entries without existing records.")
   }
 
   invisible(TRUE)
 }
 
+
 #' Check and Harmonize Sample Names Against DROMA Database
 #'
 #' @description Checks sample names (column names) against the sample_anno table in the DROMA database
-#' and provides harmonized mappings. Uses fuzzy matching and name cleaning similar to the approach
-#' in 02-harmonized_name.Rmd.
+#' and provides harmonized mappings. Uses fuzzy matching and name cleaning approach.
 #'
 #' @param sample_names Character vector of sample names to check and harmonize
 #' @param connection Optional database connection object. If NULL, uses global connection
@@ -1619,8 +2017,7 @@ checkDROMASampleNames <- function(sample_names, connection = NULL, max_distance 
 #' Check and Harmonize Drug Names Against DROMA Database
 #'
 #' @description Checks drug names (row names) against the drug_anno table in the DROMA database
-#' and provides harmonized mappings. Uses fuzzy matching and name cleaning similar to the approach
-#' in 02-harmonized_name.Rmd.
+#' and provides harmonized mappings. Uses fuzzy matching and name cleaning approach.
 #'
 #' @param drug_names Character vector of drug names to check and harmonize
 #' @param connection Optional database connection object. If NULL, uses global connection
@@ -1816,382 +2213,3 @@ checkDROMADrugNames <- function(drug_names, connection = NULL, max_distance = 0.
 
   return(result)
 }
-
-#' Update DROMA Annotation Tables with New Names
-#'
-#' @description Adds harmonized sample or drug names to the corresponding annotation tables.
-#' Processes all entries from the name_mapping dataframe. For high confidence matches,
-#' uses existing annotation information when available. Creates new entries with new_name
-#' as the primary identifier and original_name recorded in ProjectRawName. Updates existing
-#' entries if they already exist in the database.
-#'
-#' @param anno_type Character, type of annotation to update: "sample" or "drug"
-#' @param name_mapping Data frame with name mappings (output from checkDROMASampleNames or checkDROMADrugNames)
-#' @param project_name Character, the project name to assign to new entries
-#' @param data_type Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)
-#' @param tumor_type Character or character vector, the tumor type(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
-#' @param Gender Character or character vector, the gender(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
-#' @param Age Numeric or numeric vector, the age(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
-#' @param FullEthnicity Character or character vector, the full ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
-#' @param SimpleEthnicity Character or character vector, the simple ethnicity/ethnicities to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
-#' @param connection Optional database connection object. If NULL, uses global connection
-#' @return Invisibly returns TRUE if successful, along with a summary of changes
-#' @export
-#' @examples
-#' \dontrun{
-#' # Connect to database
-#' con <- connectDROMADatabase("path/to/droma.sqlite")
-#'
-#' # Check and harmonize sample names
-#' sample_mapping <- checkDROMASampleNames(colnames(my_data))
-#'
-#' # Update sample annotations with single values
-#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
-#'                      data_type = "CellLine", tumor_type = "breast cancer",
-#'                      Gender = "Female", Age = 45)
-#'
-#' # Update sample annotations with vectors (one value per sample)
-#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
-#'                      data_type = c("CellLine", "PDX", "CellLine", "PDO"),
-#'                      tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
-#'                      Gender = c("Female", "Male", "Female", "Male"),
-#'                      Age = c(45, 52, 38, 41),
-#'                      FullEthnicity = c("European", "Asian", "African", "Hispanic"),
-#'                      SimpleEthnicity = c("Caucasian", "Asian", "African", "Hispanic"))
-#'
-#' # Check and harmonize drug names
-#' drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
-#'
-#' # Update drug annotations (data_type not used for drugs)
-#' updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
-#' }
-updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_type,
-                                 tumor_type = NA_character_, Gender = NA_character_,
-                                 Age = NA_real_, FullEthnicity = NA_character_,
-                                 SimpleEthnicity = NA_character_, connection = NULL) {
-  if (!requireNamespace("DBI", quietly = TRUE)) {
-    stop("Package 'DBI' is required. Please install with install.packages('DBI')")
-  }
-
-  # Validate anno_type
-  if (!anno_type %in% c("sample", "drug")) {
-    stop("anno_type must be either 'sample' or 'drug'")
-  }
-
-    # Validate Age parameter - must be numeric when provided
-  if (!all(is.na(Age)) && !is.numeric(Age)) {
-    stop("Age parameter must be numeric (single value or vector) or NA")
-  }
-
-  # If Age is a vector, validate length
-  if (length(Age) > 1 && length(Age) != nrow(name_mapping)) {
-    stop("Age vector length (", length(Age), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-  }
-
-  # Validate character parameters for sample annotations
-  if (anno_type == "sample") {
-    # Validate data_type parameter
-    if (!all(is.na(data_type)) && !is.character(data_type)) {
-      stop("data_type parameter must be character (single value or vector) or NA")
-    }
-    if (length(data_type) > 1 && length(data_type) != nrow(name_mapping)) {
-      stop("data_type vector length (", length(data_type), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-    }
-
-    # Validate tumor_type parameter
-    if (!all(is.na(tumor_type)) && !is.character(tumor_type)) {
-      stop("tumor_type parameter must be character (single value or vector) or NA")
-    }
-    if (length(tumor_type) > 1 && length(tumor_type) != nrow(name_mapping)) {
-      stop("tumor_type vector length (", length(tumor_type), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-    }
-
-    # Validate Gender parameter
-    if (!all(is.na(Gender)) && !is.character(Gender)) {
-      stop("Gender parameter must be character (single value or vector) or NA")
-    }
-    if (length(Gender) > 1 && length(Gender) != nrow(name_mapping)) {
-      stop("Gender vector length (", length(Gender), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-    }
-
-    # Validate FullEthnicity parameter
-    if (!all(is.na(FullEthnicity)) && !is.character(FullEthnicity)) {
-      stop("FullEthnicity parameter must be character (single value or vector) or NA")
-    }
-    if (length(FullEthnicity) > 1 && length(FullEthnicity) != nrow(name_mapping)) {
-      stop("FullEthnicity vector length (", length(FullEthnicity), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-    }
-
-    # Validate SimpleEthnicity parameter
-    if (!all(is.na(SimpleEthnicity)) && !is.character(SimpleEthnicity)) {
-      stop("SimpleEthnicity parameter must be character (single value or vector) or NA")
-    }
-    if (length(SimpleEthnicity) > 1 && length(SimpleEthnicity) != nrow(name_mapping)) {
-      stop("SimpleEthnicity vector length (", length(SimpleEthnicity), ") must match name_mapping rows (", nrow(name_mapping), ") or be a single value")
-    }
-  }
-
-  # Validate name_mapping structure
-  required_cols <- c("original_name", "cleaned_name", "harmonized_name", "match_type", "match_confidence", "new_name")
-  if (!all(required_cols %in% colnames(name_mapping))) {
-    stop("name_mapping must contain columns: ", paste(required_cols, collapse = ", "))
-  }
-
-  # Get connection from global environment if not provided
-  if (is.null(connection)) {
-    if (!exists("droma_db_connection", envir = .GlobalEnv)) {
-      stop("No database connection found. Connect first with connectDROMADatabase()")
-    }
-    connection <- get("droma_db_connection", envir = .GlobalEnv)
-  }
-
-  # Determine table name and column names
-  if (anno_type == "sample") {
-    table_name <- "sample_anno"
-    id_column <- "SampleID"
-    raw_column <- "ProjectRawName"
-    index_prefix <- "UM_SAMPLE_"
-  } else {
-    table_name <- "drug_anno"
-    id_column <- "DrugName"
-    raw_column <- "ProjectRawName"
-    index_prefix <- "UM_DRUG_"
-  }
-
-  # Check if table exists
-  all_tables <- DBI::dbListTables(connection)
-  if (!table_name %in% all_tables) {
-    stop("Annotation table '", table_name, "' not found in database")
-  }
-
-  # Get existing annotation data
-  existing_anno <- DBI::dbReadTable(connection, table_name)
-
-  # Find the maximum IndexID number for generating new IDs
-  max_index_num <- 0
-  if ("IndexID" %in% colnames(existing_anno) && nrow(existing_anno) > 0) {
-    # Extract numbers from IndexID column
-    index_ids <- existing_anno$IndexID[!is.na(existing_anno$IndexID)]
-    if (length(index_ids) > 0) {
-      # Extract numbers from IndexID strings like "UM_SAMPLE_1" or "UM_DRUG_2077"
-      numbers <- as.numeric(gsub(paste0("^", index_prefix), "", index_ids))
-      numbers <- numbers[!is.na(numbers)]
-      if (length(numbers) > 0) {
-        max_index_num <- max(numbers)
-      }
-    }
-  }
-
-  # Initialize counters
-  added_count <- 0
-  skipped_count <- 0
-  current_index_num <- max_index_num
-
-  # Process ALL entries from name_mapping - add each as a new entry
-  for (i in 1:nrow(name_mapping)) {
-    new_name <- name_mapping$new_name[i]
-    original_name <- name_mapping$original_name[i]
-    match_confidence <- name_mapping$match_confidence[i]
-
-    # Get current parameter values (handle both single values and vectors)
-    current_age <- if (length(Age) == 1) Age else Age[i]
-    current_data_type <- if (length(data_type) == 1) data_type else data_type[i]
-    current_tumor_type <- if (length(tumor_type) == 1) tumor_type else tumor_type[i]
-    current_gender <- if (length(Gender) == 1) Gender else Gender[i]
-    current_full_ethnicity <- if (length(FullEthnicity) == 1) FullEthnicity else FullEthnicity[i]
-    current_simple_ethnicity <- if (length(SimpleEthnicity) == 1) SimpleEthnicity else SimpleEthnicity[i]
-
-    # Check if this SampleID/DrugName + ProjectID combination already exists
-    if (anno_type == "sample") {
-      existing_check <- which(existing_anno$SampleID == new_name & existing_anno$ProjectID == project_name)
-    } else {
-      existing_check <- which(existing_anno$DrugName == new_name & existing_anno$ProjectID == project_name)
-    }
-
-    if (length(existing_check) > 0) {
-      # Skip this entry as it already exists
-      skipped_count <- skipped_count + 1
-      next
-    }
-
-    # Determine IndexID for this entry
-    new_index_id <- NA_character_
-    if (match_confidence == "high") {
-      # For high confidence matches, try to use existing IndexID if available
-      if (anno_type == "sample") {
-        original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
-                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
-      } else {
-        original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
-                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
-      }
-
-      if (length(original_entry_idx) > 0) {
-        original_entry <- existing_anno[original_entry_idx[1], ]
-        if ("IndexID" %in% colnames(original_entry) && !is.na(original_entry$IndexID)) {
-          new_index_id <- original_entry$IndexID
-        }
-      }
-    }
-
-    # If no existing IndexID found (or not high confidence), generate new one
-    if (is.na(new_index_id)) {
-      current_index_num <- current_index_num + 1
-      new_index_id <- paste0(index_prefix, current_index_num)
-    }
-
-    # Add new entry - behavior depends on match_confidence
-    if (match_confidence == "high") {
-      # For high confidence matches, check if we can find existing info from the harmonized name
-      if (anno_type == "sample") {
-        original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
-                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
-      } else {
-        original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
-                                   existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
-      }
-
-      if (length(original_entry_idx) > 0) {
-        # Use existing entry info but update for this project
-        # For existing entries with IndexID, use original values; user parameters only for new samples
-        original_entry <- existing_anno[original_entry_idx[1], ]
-
-        if (anno_type == "sample") {
-          insert_query <- paste0("INSERT INTO ", table_name, " (",
-                                "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
-                                "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
-                                "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          DBI::dbExecute(connection, insert_query, params = list(
-            new_name,
-            if("PatientID" %in% colnames(original_entry)) original_entry$PatientID else NA_character_,
-            project_name,
-            if("HarmonizedIdentifier" %in% colnames(original_entry)) original_entry$HarmonizedIdentifier else NA_character_,
-            # Use original values from existing annotation
-            if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_,
-            if("MolecularSubtype" %in% colnames(original_entry)) original_entry$MolecularSubtype else NA_character_,
-            if("Gender" %in% colnames(original_entry)) original_entry$Gender else NA_character_,
-            if("Age" %in% colnames(original_entry)) original_entry$Age else NA_character_,
-            if("FullEthnicity" %in% colnames(original_entry)) original_entry$FullEthnicity else NA_character_,
-            if("SimpleEthnicity" %in% colnames(original_entry)) original_entry$SimpleEthnicity else NA_character_,
-            if("TNMstage" %in% colnames(original_entry)) original_entry$TNMstage else NA_character_,
-            if("Primary_Metastasis" %in% colnames(original_entry)) original_entry$Primary_Metastasis else NA_character_,
-            # Use original data_type from existing annotation
-            if("DataType" %in% colnames(original_entry)) original_entry$DataType else current_data_type,
-            original_name,
-            if("AlternateName" %in% colnames(original_entry)) original_entry$AlternateName else NA_character_,
-            new_index_id
-          ))
-        } else {
-          insert_query <- paste0("INSERT INTO ", table_name, " (",
-                                "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
-                                "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          DBI::dbExecute(connection, insert_query, params = list(
-            new_name,
-            project_name,
-            if("Harmonized ID (Pubchem ID)" %in% colnames(original_entry)) original_entry$`Harmonized ID (Pubchem ID)` else NA_character_,
-            if("Source for Clinical Information" %in% colnames(original_entry)) original_entry$`Source for Clinical Information` else NA_character_,
-            if("Clinical Phase" %in% colnames(original_entry)) original_entry$`Clinical Phase` else NA_character_,
-            if("MOA" %in% colnames(original_entry)) original_entry$MOA else NA_character_,
-            if("Targets" %in% colnames(original_entry)) original_entry$Targets else NA_character_,
-            original_name,
-            new_index_id
-          ))
-        }
-        added_count <- added_count + 1
-      } else {
-        # Couldn't find original entry, create new one using user parameters
-        if (anno_type == "sample") {
-          insert_query <- paste0("INSERT INTO ", table_name, " (",
-                                "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
-                                "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
-                                "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          DBI::dbExecute(connection, insert_query, params = list(
-            new_name, NA_character_, project_name, NA_character_, current_tumor_type,
-            NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
-            NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
-          ))
-        } else {
-          insert_query <- paste0("INSERT INTO ", table_name, " (",
-                                "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
-                                "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          DBI::dbExecute(connection, insert_query, params = list(
-            new_name, project_name, NA_character_, NA_character_,
-            NA_character_, NA_character_, NA_character_, original_name, new_index_id
-          ))
-        }
-        added_count <- added_count + 1
-      }
-    } else {
-      # For non-high confidence matches, create new entry with new_name as identifier using user parameters
-      if (anno_type == "sample") {
-        insert_query <- paste0("INSERT INTO ", table_name, " (",
-                              "SampleID, PatientID, ProjectID, HarmonizedIdentifier, TumorType, ",
-                              "MolecularSubtype, Gender, Age, FullEthnicity, SimpleEthnicity, ",
-                              "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
-                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        DBI::dbExecute(connection, insert_query, params = list(
-          new_name, NA_character_, project_name, NA_character_, current_tumor_type,
-          NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
-          NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
-        ))
-      } else {
-        insert_query <- paste0("INSERT INTO ", table_name, " (",
-                              "DrugName, ProjectID, `Harmonized ID (Pubchem ID)`, `Source for Clinical Information`, ",
-                              "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
-                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        DBI::dbExecute(connection, insert_query, params = list(
-          new_name, project_name, NA_character_, NA_character_,
-          NA_character_, NA_character_, NA_character_, original_name, new_index_id
-        ))
-      }
-      added_count <- added_count + 1
-    }
-  }
-
-    # Update created_date if it's NA for this project
-  if (added_count > 0) {
-    all_tables <- DBI::dbListTables(connection)
-    if ("projects" %in% all_tables) {
-      # Check if project exists and has NA created_date
-      check_query <- "SELECT created_date FROM projects WHERE project_name = ?"
-      existing_project <- DBI::dbGetQuery(connection, check_query, params = list(project_name))
-
-      if (nrow(existing_project) > 0 && is.na(existing_project$created_date[1])) {
-        # Update created_date to current time
-        current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-        update_query <- "UPDATE projects SET created_date = ? WHERE project_name = ?"
-        DBI::dbExecute(connection, update_query, params = list(current_time, project_name))
-        message("  Updated created_date for project '", project_name, "' to ", current_time)
-      }
-    }
-  }
-
-  # Print summary
-  message("Updated ", table_name, " table:")
-  message("  Added: ", added_count, " new entries")
-  message("  Skipped: ", skipped_count, " existing entries")
-  if (current_index_num > max_index_num) {
-    message("  Generated new IndexIDs from ", index_prefix, max_index_num + 1, " to ", index_prefix, current_index_num)
-  }
-
-  # Print match type summary for all entries
-  match_summary <- table(name_mapping$match_type)
-  message("  Match types for processed entries:")
-  for (match_type in names(match_summary)) {
-    message("    ", match_type, ": ", match_summary[match_type])
-  }
-
-  # Additional note about sample-specific parameters
-  if (anno_type == "sample" && (added_count > 0)) {
-    message("  Note: For samples with existing IndexID, original annotation values were preserved.")
-    message("        User-provided parameters (tumor_type, Gender, Age, FullEthnicity, SimpleEthnicity)")
-    message("        were only applied to new sample entries without existing records.")
-  }
-
-  invisible(TRUE)
-}
-

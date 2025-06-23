@@ -8,8 +8,9 @@ updateDROMAAnnotation(
   anno_type,
   name_mapping,
   project_name,
-  data_type,
+  data_type = NA_character_,
   tumor_type = NA_character_,
+  PatientID = NA_character_,
   Gender = NA_character_,
   Age = NA_real_,
   FullEthnicity = NA_character_,
@@ -20,13 +21,15 @@ updateDROMAAnnotation(
 \arguments{
 \item{anno_type}{Character, type of annotation to update: "sample" or "drug"}
 
-\item{name_mapping}{Data frame with name mappings (output from checkDROMASampleNames or checkDROMADrugNames)}
+\item{name_mapping}{Data frame with name mappings containing at minimum: original_name, new_name, match_confidence columns}
 
 \item{project_name}{Character, the project name to assign to new entries}
 
 \item{data_type}{Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)}
 
 \item{tumor_type}{Character or character vector, the tumor type(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
+
+\item{PatientID}{Character or character vector, the patient ID(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
 \item{Gender}{Character or character vector, the gender(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)}
 
@@ -59,12 +62,13 @@ sample_mapping <- checkDROMASampleNames(colnames(my_data))
 # Update sample annotations with single values
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
                      data_type = "CellLine", tumor_type = "breast cancer",
-                     Gender = "Female", Age = 45)
+                     PatientID = "Patient_001", Gender = "Female", Age = 45)
 
 # Update sample annotations with vectors (one value per sample)
 updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
                      data_type = c("CellLine", "PDX", "CellLine", "PDO"),
                      tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
+                     PatientID = c("Patient_001", "Patient_002", "Patient_003", "Patient_004"),
                      Gender = c("Female", "Male", "Female", "Male"),
                      Age = c(45, 52, 38, 41),
                      FullEthnicity = c("European", "Asian", "African", "Hispanic"),
@@ -73,7 +77,7 @@ updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
 # Check and harmonize drug names
 drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
 
-# Update drug annotations (data_type not used for drugs)
+# Update drug annotations (PatientID not used for drugs)
 updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
 }
 }
