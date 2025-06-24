@@ -126,7 +126,7 @@ updateDROMADatabase <- function(obj, table_name, overwrite = FALSE, connection =
 #'
 #' @description Fetches specific feature data from the DROMA database based on selection criteria
 #' @param select_feas_type The type of feature to select (e.g., "mRNA", "cnv", "drug")
-#' @param select_feas The specific feature to select within the feature type
+#' @param select_feas The specific feature to select within the feature type (default: "all" to select entire table)
 #' @param data_sources Vector of data sources to select from (e.g., c("ccle", "gdsc"))
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or specific tumor type
@@ -135,7 +135,7 @@ updateDROMADatabase <- function(obj, table_name, overwrite = FALSE, connection =
 #' @export
 #' @note This function is provided for backward compatibility. For new code, consider
 #' using the DromaSet object approach instead.
-getFeatureFromDatabase <- function(select_feas_type, select_feas,
+getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
                                  data_sources = "all",
                                  data_type = "all", tumor_type = "all",
                                  connection = NULL) {
@@ -199,29 +199,63 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas,
     # Extract data source name from table name
     data_source <- sub(paste0("_", select_feas_type, "$"), "", table)
 
-    # Query for the specified feature
+    # Query for the specified feature or entire table
     if (select_feas_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
-      # For continuous data, get the row for the feature
-      query <- paste0("SELECT * FROM ", table, " WHERE feature_id = '", select_feas, "'")
-      feature_data <- DBI::dbGetQuery(connection, query)
+      # For continuous data
+      if (select_feas == "all") {
+        # Get entire table
+        query <- paste0("SELECT * FROM ", table)
+        feature_data <- DBI::dbGetQuery(connection, query)
 
-      if (nrow(feature_data) == 0) {
-        next  # Skip if feature not found
+        if (nrow(feature_data) == 0) {
+          next  # Skip if table is empty
+        }
+
+        # Convert to matrix format (excluding feature_id column)
+        feature_id_col <- which(names(feature_data) == "feature_id")
+        if (length(feature_id_col) > 0) {
+          feature_matrix <- as.matrix(feature_data[, -feature_id_col])
+          rownames(feature_matrix) <- feature_data$feature_id
+          feature_vector <- feature_matrix
+        } else {
+          feature_vector <- as.matrix(feature_data)
+        }
+      } else {
+        # Get the row for the specific feature
+        query <- paste0("SELECT * FROM ", table, " WHERE feature_id = '", select_feas, "'")
+        feature_data <- DBI::dbGetQuery(connection, query)
+
+        if (nrow(feature_data) == 0) {
+          next  # Skip if feature not found
+        }
+
+        # Convert to vector format (excluding feature_id column)
+        feature_vector <- as.numeric(as.vector(feature_data[1, -which(names(feature_data) == "feature_id")]))
+        names(feature_vector) <- colnames(feature_data)[-which(names(feature_data) == "feature_id")]
       }
-
-      # Convert to vector format (excluding feature_id column)
-      feature_vector <- as.numeric(as.vector(feature_data[1, -which(names(feature_data) == "feature_id")]))
-      names(feature_vector) <- colnames(feature_data)[-which(names(feature_data) == "feature_id")]
     } else {
-      # For discrete data like mutations, get sample IDs where feature is present
-      query <- paste0("SELECT cells FROM ", table, " WHERE gene = '", select_feas, "'")
-      feature_data <- DBI::dbGetQuery(connection, query)
+      # For discrete data like mutations
+      if (select_feas == "all") {
+        # Get entire table
+        query <- paste0("SELECT * FROM ", table)
+        feature_data <- DBI::dbGetQuery(connection, query)
 
-      if (nrow(feature_data) == 0) {
-        next  # Skip if feature not found
+        if (nrow(feature_data) == 0) {
+          next  # Skip if table is empty
+        }
+
+        feature_vector <- feature_data
+      } else {
+        # Get sample IDs where specific feature is present
+        query <- paste0("SELECT cells FROM ", table, " WHERE gene = '", select_feas, "'")
+        feature_data <- DBI::dbGetQuery(connection, query)
+
+        if (nrow(feature_data) == 0) {
+          next  # Skip if feature not found
+        }
+
+        feature_vector <- feature_data$cells
       }
-
-      feature_vector <- feature_data$cells
     }
 
     # Filter by samples if needed
@@ -297,8 +331,8 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
 
   # Filter to only omics and drug tables, excluding system tables and backups
   tables <- all_tables[!all_tables %in% c("sample_anno", "drug_anno", "projects", "droma_metadata", "search_vectors")]
-  # Remove backup tables like "_raw"
-  tables <- tables[!grepl("_raw$", tables)]
+  # Remove tables containing "raw", "dose", or "viability"
+  tables <- tables[!grepl("(raw|dose|viability)", tables)]
   # Only keep tables that follow the pattern "project_datatype"
   tables <- tables[grepl("^[^_]+_[^_]+", tables)]
 
@@ -589,20 +623,30 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
       next
     }
 
-    # Extract data types from table names
-    data_types <- unique(sapply(project_tables, function(t) {
+    # Extract data types from table names, excluding tables with "raw", "dose", or "viability"
+    filtered_project_tables <- project_tables[!grepl("(raw|dose|viability)", project_tables)]
+
+    data_types <- unique(sapply(filtered_project_tables, function(t) {
       sub(paste0("^", proj, "_"), "", t)
     }))
+
+    # Special handling for drug_dose and drug_viability tables
+    dose_table <- paste0(proj, "_drug_dose")
+    viability_table <- paste0(proj, "_drug_viability")
+    if (dose_table %in% project_tables || viability_table %in% project_tables) {
+      data_types <- c(data_types, "drug_dose")
+      data_types <- unique(data_types)
+    }
 
     # Determine dataset type - use user-provided or guess from sample_anno
     current_dataset_type <- dataset_type  # Use user-provided dataset_type
     sample_count <- 0
 
     if ("sample_anno" %in% all_tables) {
-      # Get sample IDs for this project from all project tables
+      # Get sample IDs for this project from filtered project tables
       sample_ids <- c()
 
-      for (table in project_tables) {
+      for (table in filtered_project_tables) {
         tryCatch({
           # Get column names from the table
           columns_query <- paste0("PRAGMA table_info(", table, ")")
@@ -646,7 +690,7 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
       current_dataset_type <- NA_character_
     }
 
-    # Count drugs in drug table if available
+    # Count drugs in drug table if available (only tables ending with "_drug$")
     drug_count <- 0
     drug_table <- paste0(proj, "_drug")
     if (drug_table %in% all_tables) {

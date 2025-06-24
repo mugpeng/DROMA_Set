@@ -242,7 +242,6 @@ for (project in names(mRNA_data)) {
 
 ### Treatment Response
 - **drug**: Drug sensitivity/response data
-- **drug_raw**: Raw drug response measurements
 
 ## Database Structure
 
