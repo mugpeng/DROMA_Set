@@ -1884,7 +1884,7 @@ checkDROMASampleNames <- function(sample_names, connection = NULL, max_distance 
     if (nchar(original_name) > 30) {
       result$harmonized_name[i] <- original_name
       result$match_type[i] <- "keep_original_long"
-      result$match_confidence[i] <- "high"
+      result$match_confidence[i] <- "medium"
       next
     }
 
