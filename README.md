@@ -7,6 +7,8 @@
 
 **DROMA_Set** is a comprehensive R package for managing and analyzing drug response and omics data across multiple projects. It provides a robust framework for handling complex multi-omics datasets with integrated drug sensitivity information, enabling seamless cross-project comparisons and analyses.
 
+It is a part of [DROMA project](https://github.com/mugpeng/DROMA) 
+
 ### Key Features
 
 - **🔬 Multi-omics Data Management**: Support for various molecular profile types (mRNA, CNV, mutations, methylation, proteomics)
