@@ -6,7 +6,7 @@
 \usage{
 getFeatureFromDatabase(
   select_feas_type,
-  select_feas,
+  select_feas = "all",
   data_sources = "all",
   data_type = "all",
   tumor_type = "all",
@@ -16,7 +16,7 @@ getFeatureFromDatabase(
 \arguments{
 \item{select_feas_type}{The type of feature to select (e.g., "mRNA", "cnv", "drug")}
 
-\item{select_feas}{The specific feature to select within the feature type}
+\item{select_feas}{The specific feature to select within the feature type (default: "all" to select entire table)}
 
 \item{data_sources}{Vector of data sources to select from (e.g., c("ccle", "gdsc"))}
 
