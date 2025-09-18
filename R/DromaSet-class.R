@@ -404,13 +404,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
 
 # Helper function for empty results
 empty_result <- function(molecular_type, return_data, object) {
-  if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
-    if (return_data) return(data.frame())
-    object@molecularProfiles[[molecular_type]] <- data.frame()
-  } else {
-    if (return_data) return(matrix(nrow = 0, ncol = 0))
-    object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-  }
+  if (return_data) return(matrix(nrow = 0, ncol = 0))
+  object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
   return(object)
 }
 
@@ -513,51 +508,168 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
 
 # Helper function to load dataframe data
 load_dataframe_data <- function(con, table_name, molecular_type, features, samples, validate_features, return_data) {
-  query_parts <- c("SELECT * FROM", table_name)
-  where_clauses <- c()
+  # Check table structure to determine format
+  col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
+  col_names <- col_info$name
 
-  # Add gene filter
-  if (!is.null(features)) {
-    if (validate_features) {
-      gene_query <- paste0("SELECT DISTINCT genes FROM ", table_name,
-                          " WHERE genes IN (", paste0("'", features, "'", collapse = ","), ")")
-      existing_genes <- DBI::dbGetQuery(con, gene_query)$genes
+  # Detect if new format (samples as columns, gene as last column)
+  # New format has feature_id column and multiple sample columns
+  is_new_format <- "feature_id" %in% col_names &&
+                   ncol(col_info) > 2 &&
+                   !("genes" %in% col_names) &&
+                   !("cells" %in% col_names)
 
-      missing_genes <- setdiff(features, existing_genes)
-      if (length(missing_genes) > 0) {
-        warning("The following genes do not exist: ", paste(missing_genes, collapse = ", "))
+  if (is_new_format) {
+    # New format: samples as columns, gene names in feature_id column
+    # This is similar to continuous data but with discrete values
+    # We can reuse the matrix loading logic
+
+    # Get all sample columns (all columns except feature_id)
+    sample_cols <- setdiff(col_names, "feature_id")
+
+    # Filter samples if specified
+    if (!is.null(samples)) {
+      sample_cols <- intersect(samples, sample_cols)
+      if (length(sample_cols) == 0) {
+        warning("No matching samples found")
+        return(data.frame())
+      }
+    }
+
+    # Build query with selected columns
+    if (!is.null(samples)) {
+      query_parts <- c("SELECT feature_id,", paste0('"', sample_cols, '"', collapse = ", "), "FROM", table_name)
+    } else {
+      query_parts <- c("SELECT * FROM", table_name)
+    }
+
+    where_clauses <- c()
+
+    # Add feature filter if specified
+    if (!is.null(features)) {
+      if (validate_features) {
+        feature_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name,
+                               " WHERE feature_id IN (", paste0("'", features, "'", collapse = ","), ")")
+        existing_features <- DBI::dbGetQuery(con, feature_query)$feature_id
+
+        missing_features <- setdiff(features, existing_features)
+        if (length(missing_features) > 0) {
+          warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
+        }
+
+        if (length(existing_features) == 0) {
+          warning("None of the specified features exist")
+          return(data.frame())
+        }
+
+        features <- existing_features
       }
 
-      if (length(existing_genes) == 0) {
-        warning("None of the specified genes exist")
+      where_clauses <- c(where_clauses, paste0("feature_id IN (", paste0("'", features, "'", collapse = ","), ")"))
+    }
+
+    # Combine WHERE clauses
+    if (length(where_clauses) > 0) {
+      query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
+    }
+
+    query <- paste(query_parts, collapse = " ")
+    data <- DBI::dbGetQuery(con, query)
+
+    if (nrow(data) == 0) {
+      warning("No data found for molecular profile type: ", molecular_type)
+      return(data.frame())
+    }
+
+    # Convert to matrix format with feature_id as row names (like continuous data)
+    feature_ids <- data$feature_id
+    data$feature_id <- NULL
+    mat <- as.matrix(data)
+    rownames(mat) <- feature_ids
+
+    return(mat)
+
+  } else {
+    # Legacy format: genes in 'genes' column, samples in 'cells' column
+    query_parts <- c("SELECT * FROM", table_name)
+    where_clauses <- c()
+
+    # Add gene filter
+    if (!is.null(features)) {
+      if (validate_features) {
+        gene_query <- paste0("SELECT DISTINCT genes FROM ", table_name,
+                            " WHERE genes IN (", paste0("'", features, "'", collapse = ","), ")")
+        existing_genes <- DBI::dbGetQuery(con, gene_query)$genes
+
+        missing_genes <- setdiff(features, existing_genes)
+        if (length(missing_genes) > 0) {
+          warning("The following genes do not exist: ", paste(missing_genes, collapse = ", "))
+        }
+
+        if (length(existing_genes) == 0) {
+          warning("None of the specified genes exist")
+          return(data.frame())
+        }
+
+        features <- existing_genes
+      }
+
+      where_clauses <- c(where_clauses, paste0("genes IN (", paste0("'", features, "'", collapse = ","), ")"))
+    }
+
+    # Add sample filter
+    if (!is.null(samples) && "cells" %in% col_names) {
+      where_clauses <- c(where_clauses, paste0("cells IN (", paste0("'", samples, "'", collapse = ","), ")"))
+    }
+
+    # Combine WHERE clauses
+    if (length(where_clauses) > 0) {
+      query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
+    }
+
+    query <- paste(query_parts, collapse = " ")
+    data <- DBI::dbGetQuery(con, query)
+
+    if (nrow(data) == 0) {
+      warning("No data found for molecular profile type: ", molecular_type)
+      return(data.frame())
+    }
+
+    # Reshape legacy format to match new format for consistency
+    if ("genes" %in% colnames(data) && "cells" %in% colnames(data)) {
+      # Convert from long to wide format
+      message("Converting legacy discrete data format to new format...")
+
+      # Get unique genes and samples
+      unique_genes <- unique(data$genes)
+      unique_samples <- unique(data$cells)
+
+      if (length(unique_genes) == 0 || length(unique_samples) == 0) {
         return(data.frame())
       }
 
-      features <- existing_genes
+      # Create wide format matrix
+      wide_data <- matrix(0, nrow = length(unique_genes), ncol = length(unique_samples))
+      rownames(wide_data) <- unique_genes
+      colnames(wide_data) <- unique_samples
+
+      # Fill in values (assuming binary presence/absence)
+      for (i in 1:nrow(data)) {
+        gene_idx <- which(unique_genes == data$genes[i])
+        sample_idx <- which(unique_samples == data$cells[i])
+        if (length(gene_idx) > 0 && length(sample_idx) > 0) {
+          wide_data[gene_idx, sample_idx] <- 1  # Presence/absence
+        }
+      }
+
+      # Return as matrix with feature_id as row names
+      return(wide_data)
     }
 
-    where_clauses <- c(where_clauses, paste0("genes IN (", paste0("'", features, "'", collapse = ","), ")"))
+    # If we reach here with legacy data that couldn't be converted,
+    # return empty matrix
+    return(matrix(nrow = 0, ncol = 0))
   }
-
-  # Add sample filter
-  if (!is.null(samples) && "cells" %in% DBI::dbListFields(con, table_name)) {
-    where_clauses <- c(where_clauses, paste0("cells IN (", paste0("'", samples, "'", collapse = ","), ")"))
-  }
-
-  # Combine WHERE clauses
-  if (length(where_clauses) > 0) {
-    query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
-  }
-
-  query <- paste(query_parts, collapse = " ")
-  data <- DBI::dbGetQuery(con, query)
-
-  if (nrow(data) == 0) {
-    warning("No data found for molecular profile type: ", molecular_type)
-    return(data.frame())
-  }
-
-  return(data)
 }
 
 # Helper function for chunked loading
