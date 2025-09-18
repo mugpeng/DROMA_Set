@@ -226,15 +226,17 @@ setMethod("availableTreatmentResponses", "DromaSet", function(object, include_db
 #' @param return_data Logical, if TRUE returns the loaded data directly instead of updating the object (default: FALSE)
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
+#' @param chunk_size Integer, number of rows to process at a time for large datasets (default: 100000)
+#' @param validate_features Logical, whether to validate that specified features exist in the database (default: TRUE)
 #' @return Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all")
+setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE)
   standardGeneric("loadMolecularProfiles"))
 
 #' @rdname loadMolecularProfiles
 #' @export
-setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all") {
-  # Handle "all" molecular_type option
+setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE) {
+  # Handle "all" molecular_type option with parallel processing
   if (molecular_type == "all") {
     # Get all available molecular profile types
     available_types <- availableMolecularProfiles(object, include_db = TRUE)
@@ -248,50 +250,72 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
       }
     }
 
-    # Load each molecular profile type
-    all_data <- list()
+    # Load molecular profile types in parallel if available
+    if (requireNamespace("parallel", quietly = TRUE) && length(available_types) > 1 && Sys.info()["sysname"] != "Windows") {
+      # Use mclapply for Unix-like systems
+      all_data <- parallel::mclapply(available_types, function(mol_type) {
+        tryCatch({
+          loadMolecularProfiles(
+            object = object,
+            molecular_type = mol_type,
+            features = features,
+            samples = samples,
+            return_data = TRUE,
+            data_type = data_type,
+            tumor_type = tumor_type,
+            chunk_size = chunk_size,
+            validate_features = validate_features
+          )
+        }, error = function(e) {
+          warning("Failed to load molecular profile '", mol_type, "': ", e$message)
+          if (mol_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+            return(data.frame())
+          } else {
+            return(matrix(nrow = 0, ncol = 0))
+          }
+        })
+      }, mc.cores = min(length(available_types), parallel::detectCores() - 1))
 
-    for (mol_type in available_types) {
-      tryCatch({
-        # Load individual molecular profile
-        mol_data <- loadMolecularProfiles(
-          object = object,
-          molecular_type = mol_type,
-          features = features,
-          samples = samples,
-          return_data = TRUE,
-          data_type = data_type,
-          tumor_type = tumor_type
-        )
-
-        # Store the data
-        all_data[[mol_type]] <- mol_data
-
-        # Update object if not returning data
-        if (!return_data) {
-          object@molecularProfiles[[mol_type]] <- mol_data
-        }
-
-        message("Loaded molecular profile: ", mol_type, " (",
-               ifelse(is.matrix(mol_data) || is.data.frame(mol_data),
-                     paste(nrow(mol_data), "features x", ncol(mol_data), "samples"),
-                     "data loaded"), ")")
-
-      }, error = function(e) {
-        warning("Failed to load molecular profile '", mol_type, "': ", e$message)
-      })
+      names(all_data) <- available_types
+    } else {
+      # Sequential loading for Windows or single core
+      all_data <- list()
+      for (mol_type in available_types) {
+        tryCatch({
+          mol_data <- loadMolecularProfiles(
+            object = object,
+            molecular_type = mol_type,
+            features = features,
+            samples = samples,
+            return_data = TRUE,
+            data_type = data_type,
+            tumor_type = tumor_type,
+            chunk_size = chunk_size,
+            validate_features = validate_features
+          )
+          all_data[[mol_type]] <- mol_data
+          message("Loaded molecular profile: ", mol_type, " (",
+                 ifelse(is.matrix(mol_data) || is.data.frame(mol_data),
+                       paste(nrow(mol_data), "features x", ncol(mol_data), "samples"),
+                       "data loaded"), ")")
+        }, error = function(e) {
+          warning("Failed to load molecular profile '", mol_type, "': ", e$message)
+        })
+      }
     }
 
-    # Return results
-    if (return_data) {
-      return(all_data)
-    } else {
+    # Update object if not returning data
+    if (!return_data) {
+      for (mol_type in names(all_data)) {
+        object@molecularProfiles[[mol_type]] <- all_data[[mol_type]]
+      }
       message("Loaded ", length(all_data), " molecular profile types for dataset '", object@name, "'")
       return(object)
+    } else {
+      return(all_data)
     }
   }
 
-  # Original single molecular_type loading logic
   # Verify we have database connection info
   if (length(object@db_info) == 0 || is.null(object@db_info$db_path)) {
     stop("No database connection information available")
@@ -301,22 +325,25 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
     stop("Database file not found: ", object@db_info$db_path)
   }
 
-  # Get group prefix (if specified) or use dataset name
+  # Get group prefix
   group_prefix <- ifelse(is.null(object@db_info$db_group), object@name, object@db_info$db_group)
 
-  # Connect to database
+  # Connect to database with optimized settings
   con <- DBI::dbConnect(RSQLite::SQLite(), object@db_info$db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
 
-  # Check if the table exists
-  table_name <- paste0(group_prefix, "_", molecular_type)
-  all_tables <- DBI::dbListTables(con)
+  # Optimize SQLite settings for performance
+  DBI::dbExecute(con, "PRAGMA journal_mode = WAL")
+  DBI::dbExecute(con, "PRAGMA synchronous = NORMAL")
+  DBI::dbExecute(con, "PRAGMA cache_size = -10000")  # 10MB cache
 
-  if (!table_name %in% all_tables) {
+  # Check table existence
+  table_name <- paste0(group_prefix, "_", molecular_type)
+  if (!table_name %in% DBI::dbListTables(con)) {
     stop("Molecular profile type '", molecular_type, "' not found for dataset '", object@name, "'")
   }
 
-  # Filter samples by data_type and tumor_type if specified
+  # Pre-filter samples based on data_type and tumor_type
   if (data_type != "all" || tumor_type != "all") {
     if (nrow(object@sampleMetadata) == 0) {
       warning("Sample metadata not available for filtering by data_type or tumor_type")
@@ -326,220 +353,271 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
       if (data_type != "all") {
         filtered_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$DataType == data_type]
         if (length(filtered_samples) == 0) {
-          warning("No samples match the specified data_type: ", data_type)
-          if (return_data) {
-            return(if(molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) data.frame() else matrix(nrow = 0, ncol = 0))
-          } else {
-            if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
-              object@molecularProfiles[[molecular_type]] <- data.frame()
-            } else {
-              object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-            }
-            return(object)
-          }
+          return(empty_result(molecular_type, return_data, object))
         }
       }
 
       if (tumor_type != "all") {
         tumor_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$TumorType == tumor_type]
         if (length(tumor_samples) == 0) {
-          warning("No samples match the specified tumor_type: ", tumor_type)
-          if (return_data) {
-            return(if(molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) data.frame() else matrix(nrow = 0, ncol = 0))
-          } else {
-            if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
-              object@molecularProfiles[[molecular_type]] <- data.frame()
-            } else {
-              object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-            }
-            return(object)
-          }
+          return(empty_result(molecular_type, return_data, object))
         }
         filtered_samples <- intersect(filtered_samples, tumor_samples)
       }
 
-      # Update samples parameter with filtered samples
-      if (is.null(samples)) {
-        samples <- filtered_samples
-      } else {
-        samples <- intersect(samples, filtered_samples)
-        if (length(samples) == 0) {
-          warning("No samples match both the specified filters and sample list")
-          if (return_data) {
-            return(if(molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) data.frame() else matrix(nrow = 0, ncol = 0))
-          } else {
-            if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
-              object@molecularProfiles[[molecular_type]] <- data.frame()
-            } else {
-              object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-            }
-            return(object)
-          }
-        }
+      samples <- if (is.null(samples)) filtered_samples else intersect(samples, filtered_samples)
+      if (length(samples) == 0) {
+        return(empty_result(molecular_type, return_data, object))
       }
     }
   }
 
-  # Variable to store the loaded data
-  loaded_data <- NULL
-
-  # Construct query based on features and samples
+  # Load data based on molecular type
   if (molecular_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms")) {
-    # For continuous data matrices
-    query <- paste0("SELECT * FROM ", table_name)
+    # For matrix data - use optimized query construction
+    result <- load_matrix_data(con, table_name, molecular_type, features, samples,
+                              chunk_size, validate_features, return_data)
 
-    # Add feature filter if specified
-    if (!is.null(features)) {
-      # First check if all features exist in the database
-      features_check_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name)
-      all_features <- DBI::dbGetQuery(con, features_check_query)$feature_id
+    if (!return_data) {
+      object@molecularProfiles[[molecular_type]] <- result
+      return(object)
+    } else {
+      return(result)
+    }
 
-      missing_features <- setdiff(features, all_features)
+  } else if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+    # For dataframe data
+    result <- load_dataframe_data(con, table_name, molecular_type, features, samples,
+                                 validate_features, return_data)
+
+    if (!return_data) {
+      object@molecularProfiles[[molecular_type]] <- result
+      return(object)
+    } else {
+      return(result)
+    }
+  } else {
+    warning("Unrecognized molecular profile type: ", molecular_type)
+    if (return_data) return(NULL)
+  }
+})
+
+# Helper function for empty results
+empty_result <- function(molecular_type, return_data, object) {
+  if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+    if (return_data) return(data.frame())
+    object@molecularProfiles[[molecular_type]] <- data.frame()
+  } else {
+    if (return_data) return(matrix(nrow = 0, ncol = 0))
+    object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
+  }
+  return(object)
+}
+
+# Helper function to load matrix data with optimizations
+load_matrix_data <- function(con, table_name, molecular_type, features, samples,
+                            chunk_size, validate_features, return_data) {
+  # Build optimized SQL query
+  query_parts <- c("SELECT * FROM", table_name)
+  where_clauses <- c()
+
+  # Add feature filter
+  if (!is.null(features)) {
+    if (validate_features) {
+      # Single query to check and filter features
+      feature_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name,
+                             " WHERE feature_id IN (", paste0("'", features, "'", collapse = ","), ")")
+      existing_features <- DBI::dbGetQuery(con, feature_query)$feature_id
+
+      missing_features <- setdiff(features, existing_features)
       if (length(missing_features) > 0) {
         warning("The following features do not exist in the ", molecular_type, " data: ",
                 paste(missing_features, collapse = ", "))
       }
 
-      # Only query for features that exist
-      existing_features <- intersect(features, all_features)
       if (length(existing_features) == 0) {
         warning("None of the specified features exist in the ", molecular_type, " data")
-        if (return_data) {
-          return(matrix(nrow = 0, ncol = 0))
-        } else {
-          object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-          return(object)
-        }
+        return(matrix(nrow = 0, ncol = 0))
       }
 
-      features_str <- paste0("'", existing_features, "'", collapse = ",")
-      query <- paste0(query, " WHERE feature_id IN (", features_str, ")")
+      features <- existing_features
     }
 
-    # Execute query
+    where_clauses <- c(where_clauses, paste0("feature_id IN (", paste0("'", features, "'", collapse = ","), ")"))
+  }
+
+  # Add sample filter if specified
+  if (!is.null(samples)) {
+    # Get all column names except feature_id
+    col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
+    sample_cols <- setdiff(col_info$name, "feature_id")
+    existing_samples <- intersect(samples, sample_cols)
+
+    if (length(existing_samples) == 0) {
+      warning("No samples match the specified filter")
+      return(matrix(nrow = 0, ncol = 0))
+    }
+
+    if (length(existing_samples) < length(samples)) {
+      missing_samples <- setdiff(samples, existing_samples)
+      warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
+    }
+
+    where_clauses <- c(where_clauses, paste0("feature_id IN (SELECT DISTINCT feature_id FROM ", table_name,
+                                           " WHERE ", paste0("'", existing_samples, "'", collapse = ","),
+                                           " IN (SELECT name FROM pragma_table_info('", table_name, "') WHERE name != 'feature_id'))"))
+  }
+
+  # Combine WHERE clauses
+  if (length(where_clauses) > 0) {
+    query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
+  }
+
+  query <- paste(query_parts, collapse = " ")
+
+  # Check table size for chunked loading
+  size_query <- paste0("SELECT COUNT(*) FROM ", table_name)
+  total_rows <- DBI::dbGetQuery(con, size_query)[1, 1]
+
+  if (total_rows > chunk_size && requireNamespace("data.table", quietly = TRUE)) {
+    # Use chunked loading with data.table
+    return(load_data_chunks(con, query, table_name, features, samples, chunk_size))
+  } else {
+    # Standard loading
     data <- DBI::dbGetQuery(con, query)
 
-    # Reshape to matrix format
-    if (nrow(data) > 0) {
-      # Extract feature_id column
-      feature_ids <- data$feature_id
-      data$feature_id <- NULL
+    if (nrow(data) == 0) {
+      warning("No data found for molecular profile type: ", molecular_type)
+      return(matrix(nrow = 0, ncol = 0))
+    }
 
-      # Convert to matrix
-      mat <- as.matrix(data)
-      rownames(mat) <- feature_ids
+    # Efficient conversion to matrix
+    feature_ids <- data$feature_id
+    data$feature_id <- NULL
 
-      # Filter by samples if needed
-      if (!is.null(samples)) {
-        # Check for missing samples
-        missing_samples <- setdiff(samples, colnames(mat))
-        if (length(missing_samples) > 0) {
-          warning("The following samples do not exist in the ", molecular_type, " data: ",
-                  paste(missing_samples, collapse = ", "))
-        }
-
-        common_samples <- intersect(colnames(mat), samples)
-        if (length(common_samples) == 0) {
-          warning("No samples match the specified filter")
-          mat <- matrix(nrow = 0, ncol = 0)
-        } else {
-          mat <- mat[, common_samples, drop = FALSE]
-        }
-      }
-
-      # Store the loaded data
-      loaded_data <- mat
-
-      # Store in object if not returning data directly
-      if (!return_data) {
-        object@molecularProfiles[[molecular_type]] <- mat
-      }
+    if (requireNamespace("data.table", quietly = TRUE)) {
+      mat <- as.matrix(data.table::as.data.table(data))
     } else {
-      warning("No data found for molecular profile type: ", molecular_type)
-      loaded_data <- matrix(nrow = 0, ncol = 0)
-
-      if (!return_data) {
-        object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
-      }
+      mat <- as.matrix(data)
     }
-  } else if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
-    # For discrete data (mutations, fusions)
-    query <- paste0("SELECT * FROM ", table_name)
+    rownames(mat) <- feature_ids
 
-    # Add feature filter if specified
-    if (!is.null(features)) {
-      # First check if all features (genes) exist in the database
-      genes_check_query <- paste0("SELECT DISTINCT genes FROM ", table_name)
-      all_genes <- DBI::dbGetQuery(con, genes_check_query)$genes
+    # Filter samples if not already done in SQL
+    if (!is.null(samples) && length(existing_samples) < ncol(mat)) {
+      mat <- mat[, existing_samples, drop = FALSE]
+    }
 
-      missing_genes <- setdiff(features, all_genes)
+    return(mat)
+  }
+}
+
+# Helper function to load dataframe data
+load_dataframe_data <- function(con, table_name, molecular_type, features, samples, validate_features, return_data) {
+  query_parts <- c("SELECT * FROM", table_name)
+  where_clauses <- c()
+
+  # Add gene filter
+  if (!is.null(features)) {
+    if (validate_features) {
+      gene_query <- paste0("SELECT DISTINCT genes FROM ", table_name,
+                          " WHERE genes IN (", paste0("'", features, "'", collapse = ","), ")")
+      existing_genes <- DBI::dbGetQuery(con, gene_query)$genes
+
+      missing_genes <- setdiff(features, existing_genes)
       if (length(missing_genes) > 0) {
-        warning("The following genes do not exist in the ", molecular_type, " data: ",
-                paste(missing_genes, collapse = ", "))
+        warning("The following genes do not exist: ", paste(missing_genes, collapse = ", "))
       }
 
-      # Only query for genes that exist
-      existing_genes <- intersect(features, all_genes)
       if (length(existing_genes) == 0) {
-        warning("None of the specified genes exist in the ", molecular_type, " data")
-        if (return_data) {
-          return(data.frame())
-        } else {
-          object@molecularProfiles[[molecular_type]] <- data.frame()
-          return(object)
-        }
+        warning("None of the specified genes exist")
+        return(data.frame())
       }
 
-      features_str <- paste0("'", existing_genes, "'", collapse = ",")
-      query <- paste0(query, " WHERE genes IN (", features_str, ")")
+      features <- existing_genes
     }
 
-    # Execute query
-    data <- DBI::dbGetQuery(con, query)
+    where_clauses <- c(where_clauses, paste0("genes IN (", paste0("'", features, "'", collapse = ","), ")"))
+  }
 
-    # Filter by samples if needed
-    if (!is.null(samples) && nrow(data) > 0) {
-      # Check for missing samples
-      if ("cells" %in% colnames(data)) {
-        missing_samples <- setdiff(samples, unique(data$cells))
-        if (length(missing_samples) > 0) {
-          warning("The following samples do not exist in the ", molecular_type, " data: ",
-                  paste(missing_samples, collapse = ", "))
-        }
+  # Add sample filter
+  if (!is.null(samples) && "cells" %in% DBI::dbListFields(con, table_name)) {
+    where_clauses <- c(where_clauses, paste0("cells IN (", paste0("'", samples, "'", collapse = ","), ")"))
+  }
 
-        data <- data[data$cells %in% samples, ]
-      }
-    }
+  # Combine WHERE clauses
+  if (length(where_clauses) > 0) {
+    query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
+  }
 
-    # Store the loaded data
-    loaded_data <- data
+  query <- paste(query_parts, collapse = " ")
+  data <- DBI::dbGetQuery(con, query)
 
-    # Store in object if not returning data directly
-    if (!return_data) {
-      if (nrow(data) > 0) {
-        object@molecularProfiles[[molecular_type]] <- data
+  if (nrow(data) == 0) {
+    warning("No data found for molecular profile type: ", molecular_type)
+    return(data.frame())
+  }
+
+  return(data)
+}
+
+# Helper function for chunked loading
+load_data_chunks <- function(con, base_query, table_name, features, samples, chunk_size) {
+  # Get total count for progress
+  count_query <- gsub("SELECT \\*", "SELECT COUNT(*)", base_query)
+  total_count <- DBI::dbGetQuery(con, count_query)[1, 1]
+
+  # Get sample columns
+  col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
+  sample_cols <- setdiff(col_info$name, "feature_id")
+
+  # Initialize empty matrix
+  result_matrix <- matrix(nrow = 0, ncol = length(sample_cols))
+  colnames(result_matrix) <- sample_cols
+
+  # Process in chunks
+  offset <- 0
+  processed <- 0
+
+  while (processed < total_count) {
+    chunk_query <- paste0(base_query, " LIMIT ", chunk_size, " OFFSET ", offset)
+    chunk_data <- DBI::dbGetQuery(con, chunk_query)
+
+    if (nrow(chunk_data) > 0) {
+      feature_ids <- chunk_data$feature_id
+      chunk_data$feature_id <- NULL
+
+      chunk_matrix <- as.matrix(chunk_data)
+      rownames(chunk_matrix) <- feature_ids
+
+      # Combine with results
+      if (nrow(result_matrix) == 0) {
+        result_matrix <- chunk_matrix
       } else {
-        warning("No data found for molecular profile type: ", molecular_type)
-        object@molecularProfiles[[molecular_type]] <- data.frame()
+        # Use rbind efficiently
+        result_matrix <- rbind(result_matrix, chunk_matrix)
       }
-    } else if (nrow(data) == 0) {
-      warning("No data found for molecular profile type: ", molecular_type)
-      loaded_data <- data.frame()
     }
-  } else {
-    warning("Unrecognized molecular profile type: ", molecular_type)
-    if (return_data) {
-      return(NULL)
+
+    processed <- processed + nrow(chunk_data)
+    offset <- offset + chunk_size
+
+    # Progress message for large datasets
+    if (total_count > chunk_size * 10) {
+      message(sprintf("Processed %d/%d rows (%.1f%%)", processed, total_count,
+                      (processed/total_count)*100))
     }
   }
 
-  # Return either the updated object or the loaded data
-  if (return_data) {
-    return(loaded_data)
-  } else {
-    return(object)
+  # Final filtering if needed
+  if (!is.null(samples)) {
+    common_samples <- intersect(colnames(result_matrix), samples)
+    if (length(common_samples) > 0) {
+      result_matrix <- result_matrix[, common_samples, drop = FALSE]
+    }
   }
-})
+
+  return(result_matrix)
+}
 
 #' Load Treatment Response from Database
 #'

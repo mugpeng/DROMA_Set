@@ -12,7 +12,9 @@ loadMolecularProfiles(
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  chunk_size = 1e+05,
+  validate_features = TRUE
 )
 
 \S4method{loadMolecularProfiles}{DromaSet}(
@@ -22,7 +24,9 @@ loadMolecularProfiles(
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  chunk_size = 1e+05,
+  validate_features = TRUE
 )
 }
 \arguments{
@@ -39,6 +43,10 @@ loadMolecularProfiles(
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"}
 
 \item{tumor_type}{Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")}
+
+\item{chunk_size}{Integer, number of rows to process at a time for large datasets (default: 100000)}
+
+\item{validate_features}{Logical, whether to validate that specified features exist in the database (default: TRUE)}
 }
 \value{
 Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE
