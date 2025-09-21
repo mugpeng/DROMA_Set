@@ -630,3 +630,83 @@ setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object,
 
   return(data_list)
 })
+
+#' Subset MultiDromaSet Object
+#'
+#' @description Creates a subset of a MultiDromaSet object containing only specified projects
+#' @param x A MultiDromaSet object
+#' @param projects Character vector, project names to include in the subset
+#' @param drop Logical, whether to drop projects that don't exist (default: FALSE)
+#' @param ... Additional arguments (currently unused)
+#' @return A new MultiDromaSet object containing only the specified projects
+#' @export
+#' @examples
+#' \dontrun{
+#' # Create a subset with specific projects
+#' multi_subset <- subset(multi_set, projects = c("gCSI", "CCLE"))
+#'
+#' # Create a subset with non-existent projects (drop = FALSE will raise error)
+#' multi_subset <- subset(multi_set, projects = c("gCSI", "UNKNOWN"), drop = FALSE)
+#'
+#' # Create a subset with non-existent projects (drop = TRUE will ignore them)
+#' multi_subset <- subset(multi_set, projects = c("gCSI", "UNKNOWN"), drop = TRUE)
+#' }
+setMethod("subset", "MultiDromaSet", function(x, projects, drop = FALSE, ...) {
+
+  # Validate input
+  if (!is.character(projects)) {
+    stop("projects must be a character vector")
+  }
+
+  if (length(projects) == 0) {
+    stop("At least one project must be specified")
+  }
+
+  # Check which projects exist
+  existing_projects <- projects %in% x@name
+
+  if (!any(existing_projects)) {
+    stop("None of the specified projects exist in MultiDromaSet")
+  }
+
+  # Handle non-existent projects based on drop parameter
+  if (!drop && !all(existing_projects)) {
+    missing_projects <- projects[!existing_projects]
+    stop("The following projects do not exist: ", paste(missing_projects, collapse = ", "))
+  }
+
+  # Get only existing projects
+  valid_projects <- projects[existing_projects]
+
+  # Extract DromaSets for valid projects
+  subset_droma_sets <- x@DromaSets[valid_projects]
+
+  # Filter sample metadata
+  if (nrow(x@sampleMetadata) > 0) {
+    subset_sample_metadata <- x@sampleMetadata[x@sampleMetadata$ProjectID %in% valid_projects, , drop = FALSE]
+  } else {
+    subset_sample_metadata <- data.frame()
+  }
+
+  # Filter treatment metadata
+  if (nrow(x@treatmentMetadata) > 0) {
+    subset_treatment_metadata <- x@treatmentMetadata[x@treatmentMetadata$ProjectID %in% valid_projects, , drop = FALSE]
+  } else {
+    subset_treatment_metadata <- data.frame()
+  }
+
+  # Update dataset types based on remaining projects
+  subset_dataset_types <- unique(sapply(subset_droma_sets, function(ds) ds@datasetType))
+  subset_dataset_types <- subset_dataset_types[!is.na(subset_dataset_types)]
+
+  # Create new MultiDromaSet object
+  subset_object <- new("MultiDromaSet",
+                     name = valid_projects,
+                     DromaSets = subset_droma_sets,
+                     sampleMetadata = subset_sample_metadata,
+                     treatmentMetadata = subset_treatment_metadata,
+                     datasetType = subset_dataset_types,
+                     db_info = x@db_info)
+
+  return(subset_object)
+})
