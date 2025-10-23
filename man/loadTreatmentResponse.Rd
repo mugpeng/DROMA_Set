@@ -11,7 +11,8 @@ loadTreatmentResponse(
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 
 \S4method{loadTreatmentResponse}{DromaSet}(
@@ -20,7 +21,8 @@ loadTreatmentResponse(
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 }
 \arguments{
@@ -35,6 +37,8 @@ loadTreatmentResponse(
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"}
 
 \item{tumor_type}{Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")}
+
+\item{zscore}{Logical, whether to apply z-score normalization (default: FALSE)}
 }
 \value{
 Updated DromaSet object with loaded drug response data or the loaded data directly if return_data=TRUE

@@ -425,12 +425,12 @@ setMethod("getOverlappingSamples", "MultiDromaSet", function(object, projects = 
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
 #' @return A list containing molecular profile matrices from each project
 #' @export
-setGeneric("loadMultiProjectMolecularProfiles", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all")
+setGeneric("loadMultiProjectMolecularProfiles", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
   standardGeneric("loadMultiProjectMolecularProfiles"))
 
 #' @rdname loadMultiProjectMolecularProfiles
 #' @export
-setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all") {
+setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
   if (is.null(projects)) {
     projects <- object@name
   }
@@ -469,7 +469,8 @@ setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object,
           projects = projects,
           overlap_only = overlap_only,
           data_type = data_type,
-          tumor_type = tumor_type
+          tumor_type = tumor_type,
+          zscore = zscore
         )
 
         # Store results with molecular type as top-level key
@@ -495,7 +496,8 @@ setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object,
     tryCatch({
       data_list[[proj]] <- loadMolecularProfiles(ds, molecular_type = molecular_type,
                                                 features = features, return_data = TRUE,
-                                                data_type = data_type, tumor_type = tumor_type)
+                                                data_type = data_type, tumor_type = tumor_type,
+                                                zscore = zscore)
     }, error = function(e) {
       warning("Problem with loading molecular profiles from project '", proj, "': ", e$message)
       data_list[[proj]] <- NULL
@@ -557,12 +559,12 @@ setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object,
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
 #' @return A list containing treatment response matrices from each project
 #' @export
-setGeneric("loadMultiProjectTreatmentResponse", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all")
+setGeneric("loadMultiProjectTreatmentResponse", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
   standardGeneric("loadMultiProjectTreatmentResponse"))
 
 #' @rdname loadMultiProjectTreatmentResponse
 #' @export
-setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all") {
+setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object, drugs = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
   if (is.null(projects)) {
     projects <- object@name
   }
@@ -581,7 +583,8 @@ setMethod("loadMultiProjectTreatmentResponse", "MultiDromaSet", function(object,
 
     tryCatch({
       data_list[[proj]] <- loadTreatmentResponse(ds, drugs = drugs, return_data = TRUE,
-                                                data_type = data_type, tumor_type = tumor_type)
+                                                data_type = data_type, tumor_type = tumor_type,
+                                                zscore = zscore)
     }, error = function(e) {
       warning("Problem with loading treatment response from project '", proj, "': ", e$message)
       data_list[[proj]] <- NULL

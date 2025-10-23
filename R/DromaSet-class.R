@@ -1,5 +1,19 @@
 #!/usr/bin/env Rscript
 
+#' Z-score normalization for omics data
+#'
+#' @description Apply Z-score normalization to omics data at the gene level
+#' @param mat A matrix or data frame with genes in rows and samples in columns
+#' @return A normalized matrix with Z-scores
+#' @export
+zscoreNormalize <- function(mat) {
+  # Apply z-score normalization to each row (gene)
+  normalized <- t(scale(t(mat)))
+  # Handle any potential NaN values (e.g., if SD was 0)
+  normalized[is.nan(normalized)] <- 0
+  return(normalized)
+}
+
 #' DromaSet Class
 #'
 #' @description A class to represent a DROMA project dataset with drug response and omics data.
@@ -228,14 +242,15 @@ setMethod("availableTreatmentResponses", "DromaSet", function(object, include_db
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
 #' @param chunk_size Integer, number of rows to process at a time for large datasets (default: 100000)
 #' @param validate_features Logical, whether to validate that specified features exist in the database (default: TRUE)
+#' @param zscore Logical, whether to apply z-score normalization to continuous data (default: FALSE)
 #' @return Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE)
+setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE)
   standardGeneric("loadMolecularProfiles"))
 
 #' @rdname loadMolecularProfiles
 #' @export
-setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE) {
+setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE) {
   # Handle "all" molecular_type option with parallel processing
   if (molecular_type == "all") {
     # Get all available molecular profile types
@@ -264,7 +279,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
             data_type = data_type,
             tumor_type = tumor_type,
             chunk_size = chunk_size,
-            validate_features = validate_features
+            validate_features = validate_features,
+            zscore = zscore
           )
         }, error = function(e) {
           warning("Failed to load molecular profile '", mol_type, "': ", e$message)
@@ -291,7 +307,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
             data_type = data_type,
             tumor_type = tumor_type,
             chunk_size = chunk_size,
-            validate_features = validate_features
+            validate_features = validate_features,
+            zscore = zscore
           )
           all_data[[mol_type]] <- mol_data
           message("Loaded molecular profile: ", mol_type, " (",
@@ -378,6 +395,12 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
     result <- load_matrix_data(con, table_name, molecular_type, features, samples,
                               chunk_size, validate_features, return_data)
 
+    # Apply z-score normalization if requested
+    if (zscore && !is.null(result) && is.matrix(result) && nrow(result) > 0 && ncol(result) > 0) {
+      result <- zscoreNormalize(result)
+      attr(result, "zscore_normalized") <- TRUE
+    }
+
     if (!return_data) {
       object@molecularProfiles[[molecular_type]] <- result
       return(object)
@@ -389,6 +412,11 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
     # For dataframe data
     result <- load_dataframe_data(con, table_name, molecular_type, features, samples,
                                  validate_features, return_data)
+
+    # No z-score normalization for discrete data
+    if (zscore) {
+      warning("Z-score normalization not applicable for molecular type: ", molecular_type)
+    }
 
     if (!return_data) {
       object@molecularProfiles[[molecular_type]] <- result
@@ -740,14 +768,15 @@ load_data_chunks <- function(con, base_query, table_name, features, samples, chu
 #' @param return_data Logical, if TRUE returns the loaded data directly instead of updating the object (default: FALSE)
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
+#' @param zscore Logical, whether to apply z-score normalization (default: FALSE)
 #' @return Updated DromaSet object with loaded drug response data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadTreatmentResponse", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all")
+setGeneric("loadTreatmentResponse", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
   standardGeneric("loadTreatmentResponse"))
 
 #' @rdname loadTreatmentResponse
 #' @export
-setMethod("loadTreatmentResponse", "DromaSet", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all") {
+setMethod("loadTreatmentResponse", "DromaSet", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
   # Verify we have database connection info
   if (length(object@db_info) == 0 || is.null(object@db_info$db_path)) {
     stop("No database connection information available")
@@ -892,9 +921,15 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, drugs = NULL, sa
     # Store the loaded data
     loaded_data <- mat
 
+    # Apply z-score normalization if requested
+    if (zscore && !is.null(loaded_data) && is.matrix(loaded_data) && nrow(loaded_data) > 0 && ncol(loaded_data) > 0) {
+      loaded_data <- zscoreNormalize(loaded_data)
+      attr(loaded_data, "zscore_normalized") <- TRUE
+    }
+
     # Store in object if not returning data directly
     if (!return_data) {
-      object@treatmentResponse[["drug"]] <- mat
+      object@treatmentResponse[["drug"]] <- loaded_data
     }
   } else {
     warning("No data found for treatment response")

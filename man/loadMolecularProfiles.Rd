@@ -14,7 +14,8 @@ loadMolecularProfiles(
   data_type = "all",
   tumor_type = "all",
   chunk_size = 1e+05,
-  validate_features = TRUE
+  validate_features = TRUE,
+  zscore = FALSE
 )
 
 \S4method{loadMolecularProfiles}{DromaSet}(
@@ -26,7 +27,8 @@ loadMolecularProfiles(
   data_type = "all",
   tumor_type = "all",
   chunk_size = 1e+05,
-  validate_features = TRUE
+  validate_features = TRUE,
+  zscore = FALSE
 )
 }
 \arguments{
@@ -47,6 +49,8 @@ loadMolecularProfiles(
 \item{chunk_size}{Integer, number of rows to process at a time for large datasets (default: 100000)}
 
 \item{validate_features}{Logical, whether to validate that specified features exist in the database (default: TRUE)}
+
+\item{zscore}{Logical, whether to apply z-score normalization to continuous data (default: FALSE)}
 }
 \value{
 Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE

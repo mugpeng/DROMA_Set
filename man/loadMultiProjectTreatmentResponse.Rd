@@ -11,7 +11,8 @@ loadMultiProjectTreatmentResponse(
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 
 \S4method{loadMultiProjectTreatmentResponse}{MultiDromaSet}(
@@ -20,7 +21,8 @@ loadMultiProjectTreatmentResponse(
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 }
 \arguments{

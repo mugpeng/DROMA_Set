@@ -12,7 +12,8 @@ loadMultiProjectMolecularProfiles(
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 
 \S4method{loadMultiProjectMolecularProfiles}{MultiDromaSet}(
@@ -22,7 +23,8 @@ loadMultiProjectMolecularProfiles(
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
-  tumor_type = "all"
+  tumor_type = "all",
+  zscore = FALSE
 )
 }
 \arguments{
