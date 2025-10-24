@@ -486,9 +486,8 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
       warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
     }
 
-    where_clauses <- c(where_clauses, paste0("feature_id IN (SELECT DISTINCT feature_id FROM ", table_name,
-                                           " WHERE ", paste0("'", existing_samples, "'", collapse = ","),
-                                           " IN (SELECT name FROM pragma_table_info('", table_name, "') WHERE name != 'feature_id'))"))
+    # Sample filtering will be done after data retrieval
+    samples <- existing_samples
   }
 
   # Combine WHERE clauses
@@ -525,9 +524,9 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
     }
     rownames(mat) <- feature_ids
 
-    # Filter samples if not already done in SQL
-    if (!is.null(samples) && length(existing_samples) < ncol(mat)) {
-      mat <- mat[, existing_samples, drop = FALSE]
+    # Filter samples if specified
+    if (!is.null(samples)) {
+      mat <- mat[, samples, drop = FALSE]
     }
 
     return(mat)
@@ -540,12 +539,12 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
   col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
   col_names <- col_info$name
 
-  # Detect if new format (samples as columns, gene as last column)
+  # Detect if new format (samples as columns, features in feature_id column)
   # New format has feature_id column and multiple sample columns
   is_new_format <- "feature_id" %in% col_names &&
                    ncol(col_info) > 2 &&
-                   !("genes" %in% col_names) &&
-                   !("cells" %in% col_names)
+                   !("features" %in% col_names) &&
+                   !("samples" %in% col_names)
 
   if (is_new_format) {
     # New format: samples as columns, gene names in feature_id column
@@ -557,11 +556,19 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
 
     # Filter samples if specified
     if (!is.null(samples)) {
-      sample_cols <- intersect(samples, sample_cols)
-      if (length(sample_cols) == 0) {
+      existing_samples <- intersect(samples, sample_cols)
+      
+      if (length(existing_samples) == 0) {
         warning("No matching samples found")
         return(data.frame())
       }
+      
+      if (length(existing_samples) < length(samples)) {
+        missing_samples <- setdiff(samples, existing_samples)
+        warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
+      }
+      
+      sample_cols <- existing_samples
     }
 
     # Build query with selected columns
@@ -618,36 +625,60 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
     return(mat)
 
   } else {
-    # Legacy format: genes in 'genes' column, samples in 'cells' column
+    # Standard format: features in 'features' column, samples in 'samples' column
+    # Get all unique samples from database if not specified
+    if (is.null(samples) && "samples" %in% col_names) {
+      all_samples_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
+      samples <- DBI::dbGetQuery(con, all_samples_query)$samples
+    }
+    
     query_parts <- c("SELECT * FROM", table_name)
     where_clauses <- c()
 
-    # Add gene filter
+    # Add feature filter
     if (!is.null(features)) {
       if (validate_features) {
-        gene_query <- paste0("SELECT DISTINCT genes FROM ", table_name,
-                            " WHERE genes IN (", paste0("'", features, "'", collapse = ","), ")")
-        existing_genes <- DBI::dbGetQuery(con, gene_query)$genes
+        feature_query <- paste0("SELECT DISTINCT features FROM ", table_name,
+                            " WHERE features IN (", paste0("'", features, "'", collapse = ","), ")")
+        existing_features <- DBI::dbGetQuery(con, feature_query)$features
 
-        missing_genes <- setdiff(features, existing_genes)
-        if (length(missing_genes) > 0) {
-          warning("The following genes do not exist: ", paste(missing_genes, collapse = ", "))
+        missing_features <- setdiff(features, existing_features)
+        if (length(missing_features) > 0) {
+          warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
         }
 
-        if (length(existing_genes) == 0) {
-          warning("None of the specified genes exist")
+        if (length(existing_features) == 0) {
+          warning("None of the specified features exist")
           return(data.frame())
         }
 
-        features <- existing_genes
+        features <- existing_features
       }
 
-      where_clauses <- c(where_clauses, paste0("genes IN (", paste0("'", features, "'", collapse = ","), ")"))
+      where_clauses <- c(where_clauses, paste0("features IN (", paste0("'", features, "'", collapse = ","), ")"))
     }
 
     # Add sample filter
-    if (!is.null(samples) && "cells" %in% col_names) {
-      where_clauses <- c(where_clauses, paste0("cells IN (", paste0("'", samples, "'", collapse = ","), ")"))
+    if (!is.null(samples) && "samples" %in% col_names) {
+      # Verify which samples exist in the database
+      sample_check_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
+      all_db_samples <- DBI::dbGetQuery(con, sample_check_query)$samples
+      
+      existing_samples <- intersect(samples, all_db_samples)
+      
+      if (length(existing_samples) == 0) {
+        warning("No matching samples found")
+        return(data.frame())
+      }
+      
+      if (length(existing_samples) < length(samples)) {
+        missing_samples <- setdiff(samples, existing_samples)
+        warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
+      }
+      
+      where_clauses <- c(where_clauses, paste0("samples IN (", paste0("'", existing_samples, "'", collapse = ","), ")"))
+      # Update samples variable for later use in wide format conversion
+      samples <- existing_samples
     }
 
     # Combine WHERE clauses
@@ -663,38 +694,41 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
       return(data.frame())
     }
 
-    # Reshape legacy format to match new format for consistency
-    if ("genes" %in% colnames(data) && "cells" %in% colnames(data)) {
+    # Reshape long format to wide format for consistency
+    if ("features" %in% colnames(data) && "samples" %in% colnames(data)) {
       # Convert from long to wide format
-      message("Converting legacy discrete data format to new format...")
+      message("Converting long discrete data format to wide format...")
 
-      # Get unique genes and samples
-      unique_genes <- unique(data$genes)
-      unique_samples <- unique(data$cells)
+      # Get unique features and samples
+      unique_features <- unique(data$features)
+      # Use all samples (from database query or specified parameter)
+      # This ensures samples without mutations are included and marked as 0
+      unique_samples <- samples
 
-      if (length(unique_genes) == 0 || length(unique_samples) == 0) {
+      if (length(unique_features) == 0 || length(unique_samples) == 0) {
         return(data.frame())
       }
 
-      # Create wide format matrix
-      wide_data <- matrix(0, nrow = length(unique_genes), ncol = length(unique_samples))
-      rownames(wide_data) <- unique_genes
+      # Create wide format matrix initialized with 0 (no mutation)
+      wide_data <- matrix(0, nrow = length(unique_features), ncol = length(unique_samples))
+      rownames(wide_data) <- unique_features
       colnames(wide_data) <- unique_samples
 
-      # Fill in values (assuming binary presence/absence)
-      for (i in 1:nrow(data)) {
-        gene_idx <- which(unique_genes == data$genes[i])
-        sample_idx <- which(unique_samples == data$cells[i])
-        if (length(gene_idx) > 0 && length(sample_idx) > 0) {
-          wide_data[gene_idx, sample_idx] <- 1  # Presence/absence
-        }
+      # Fill in values using vectorized indexing (mark mutations with 1)
+      indices <- cbind(
+        match(data$features, unique_features),
+        match(data$samples, unique_samples)
+      )
+      valid_idx <- !is.na(indices[,1]) & !is.na(indices[,2])
+      if (any(valid_idx)) {
+        wide_data[indices[valid_idx, , drop = FALSE]] <- 1
       }
 
-      # Return as matrix with feature_id as row names
+      # Return as matrix with feature names as row names
       return(wide_data)
     }
 
-    # If we reach here with legacy data that couldn't be converted,
+    # If we reach here with data that couldn't be converted,
     # return empty matrix
     return(matrix(nrow = 0, ncol = 0))
   }
