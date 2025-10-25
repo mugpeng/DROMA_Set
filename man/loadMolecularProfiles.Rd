@@ -15,7 +15,8 @@ loadMolecularProfiles(
   tumor_type = "all",
   chunk_size = 1e+05,
   validate_features = TRUE,
-  zscore = FALSE
+  zscore = FALSE,
+  format = "long"
 )
 
 \S4method{loadMolecularProfiles}{DromaSet}(
@@ -28,7 +29,8 @@ loadMolecularProfiles(
   tumor_type = "all",
   chunk_size = 1e+05,
   validate_features = TRUE,
-  zscore = FALSE
+  zscore = FALSE,
+  format = "long"
 )
 }
 \arguments{
@@ -51,6 +53,8 @@ loadMolecularProfiles(
 \item{validate_features}{Logical, whether to validate that specified features exist in the database (default: TRUE)}
 
 \item{zscore}{Logical, whether to apply z-score normalization to continuous data (default: FALSE)}
+
+\item{format}{Character, format of returned discrete data: "wide" (features as rows, samples as columns) or "long" (default, original database format with features and samples columns)}
 }
 \value{
 Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE

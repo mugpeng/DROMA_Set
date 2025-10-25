@@ -13,7 +13,8 @@ loadMultiProjectMolecularProfiles(
   overlap_only = FALSE,
   data_type = "all",
   tumor_type = "all",
-  zscore = FALSE
+  zscore = FALSE,
+  format = "long"
 )
 
 \S4method{loadMultiProjectMolecularProfiles}{MultiDromaSet}(
@@ -24,7 +25,8 @@ loadMultiProjectMolecularProfiles(
   overlap_only = FALSE,
   data_type = "all",
   tumor_type = "all",
-  zscore = FALSE
+  zscore = FALSE,
+  format = "long"
 )
 }
 \arguments{
@@ -41,6 +43,8 @@ loadMultiProjectMolecularProfiles(
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"}
 
 \item{tumor_type}{Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")}
+
+\item{format}{Character, format of returned discrete data: "wide" (features as rows, samples as columns) or "long" (default, original database format with features and samples columns)}
 }
 \value{
 A list containing molecular profile matrices from each project

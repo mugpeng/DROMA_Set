@@ -423,14 +423,15 @@ setMethod("getOverlappingSamples", "MultiDromaSet", function(object, projects = 
 #' @param overlap_only Logical, whether to return only overlapping samples (default: FALSE)
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or any specific tumor type (e.g., "lung cancer", "breast cancer")
+#' @param format Character, format of returned discrete data: "wide" (features as rows, samples as columns) or "long" (default, original database format with features and samples columns)
 #' @return A list containing molecular profile matrices from each project
 #' @export
-setGeneric("loadMultiProjectMolecularProfiles", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
+setGeneric("loadMultiProjectMolecularProfiles", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE, format = "long")
   standardGeneric("loadMultiProjectMolecularProfiles"))
 
 #' @rdname loadMultiProjectMolecularProfiles
 #' @export
-setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
+setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object, molecular_type, features = NULL, projects = NULL, overlap_only = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE, format = "long") {
   if (is.null(projects)) {
     projects <- object@name
   }
@@ -470,7 +471,8 @@ setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object,
           overlap_only = overlap_only,
           data_type = data_type,
           tumor_type = tumor_type,
-          zscore = zscore
+          zscore = zscore,
+          format = format
         )
 
         # Store results with molecular type as top-level key
@@ -497,7 +499,7 @@ setMethod("loadMultiProjectMolecularProfiles", "MultiDromaSet", function(object,
       data_list[[proj]] <- loadMolecularProfiles(ds, molecular_type = molecular_type,
                                                 features = features, return_data = TRUE,
                                                 data_type = data_type, tumor_type = tumor_type,
-                                                zscore = zscore)
+                                                zscore = zscore, format = format)
     }, error = function(e) {
       warning("Problem with loading molecular profiles from project '", proj, "': ", e$message)
       data_list[[proj]] <- NULL
@@ -685,14 +687,14 @@ setMethod("subset", "MultiDromaSet", function(x, projects, drop = FALSE, ...) {
   subset_droma_sets <- x@DromaSets[valid_projects]
 
   # Filter sample metadata
-  if (nrow(x@sampleMetadata) > 0) {
+  if (nrow(x@sampleMetadata) > 0 && "ProjectID" %in% colnames(x@sampleMetadata)) {
     subset_sample_metadata <- x@sampleMetadata[x@sampleMetadata$ProjectID %in% valid_projects, , drop = FALSE]
   } else {
     subset_sample_metadata <- data.frame()
   }
 
   # Filter treatment metadata
-  if (nrow(x@treatmentMetadata) > 0) {
+  if (nrow(x@treatmentMetadata) > 0 && "ProjectID" %in% colnames(x@treatmentMetadata)) {
     subset_treatment_metadata <- x@treatmentMetadata[x@treatmentMetadata$ProjectID %in% valid_projects, , drop = FALSE]
   } else {
     subset_treatment_metadata <- data.frame()

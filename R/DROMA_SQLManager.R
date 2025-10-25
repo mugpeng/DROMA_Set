@@ -667,13 +667,15 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
       # If dataset_type is NULL, try to guess from sample_anno
       if (is.null(current_dataset_type) && length(sample_ids) > 0) {
         tryCatch({
+          # Limit sample_ids to avoid SQL parameter overflow (max 999 for SQLite)
+          sample_ids_subset <- head(sample_ids, 500)
           # Use parameterized query to avoid SQL injection
-          placeholders <- paste(rep("?", length(sample_ids)), collapse = ",")
+          placeholders <- paste(rep("?", length(sample_ids_subset)), collapse = ",")
           types_query <- paste0(
             "SELECT DISTINCT DataType FROM sample_anno WHERE SampleID IN (",
             placeholders, ") AND ProjectID = ?"
           )
-          params <- c(as.list(sample_ids), proj)
+          params <- c(as.list(sample_ids_subset), proj)
           types_result <- DBI::dbGetQuery(connection, types_query, params = params)
 
           if (nrow(types_result) > 0) {
@@ -1637,11 +1639,13 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
     if (match_confidence == "high") {
       # For high confidence matches, check if we can find existing info from the harmonized name
       if (anno_type == "sample") {
+        has_raw_name <- "ProjectRawName" %in% colnames(existing_anno)
         original_entry_idx <- which(existing_anno$SampleID == name_mapping$harmonized_name[i] |
-                                      existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+                                      (has_raw_name && existing_anno$ProjectRawName == name_mapping$harmonized_name[i]))
       } else {
+        has_raw_name <- "ProjectRawName" %in% colnames(existing_anno)
         original_entry_idx <- which(existing_anno$DrugName == name_mapping$harmonized_name[i] |
-                                      existing_anno$ProjectRawName == name_mapping$harmonized_name[i])
+                                      (has_raw_name && existing_anno$ProjectRawName == name_mapping$harmonized_name[i]))
       }
 
       if (length(original_entry_idx) > 0) {
@@ -1664,7 +1668,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
             if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_,
             if("MolecularSubtype" %in% colnames(original_entry)) original_entry$MolecularSubtype else NA_character_,
             if("Gender" %in% colnames(original_entry)) original_entry$Gender else NA_character_,
-            if("Age" %in% colnames(original_entry)) original_entry$Age else NA_character_,
+            if("Age" %in% colnames(original_entry)) original_entry$Age else current_age,
             if("FullEthnicity" %in% colnames(original_entry)) original_entry$FullEthnicity else NA_character_,
             if("SimpleEthnicity" %in% colnames(original_entry)) original_entry$SimpleEthnicity else NA_character_,
             if("TNMstage" %in% colnames(original_entry)) original_entry$TNMstage else NA_character_,
@@ -1703,7 +1707,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                   DBI::dbExecute(connection, insert_query, params = list(
           new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
-          NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
+          NA_character_, current_gender, current_age, current_full_ethnicity, current_simple_ethnicity,
           NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
         ))
         } else {
@@ -1728,7 +1732,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         DBI::dbExecute(connection, insert_query, params = list(
           new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
-          NA_character_, current_gender, if(is.na(current_age)) NA_character_ else as.character(current_age), current_full_ethnicity, current_simple_ethnicity,
+          NA_character_, current_gender, current_age, current_full_ethnicity, current_simple_ethnicity,
           NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
         ))
       } else {

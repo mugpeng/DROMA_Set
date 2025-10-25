@@ -243,14 +243,15 @@ setMethod("availableTreatmentResponses", "DromaSet", function(object, include_db
 #' @param chunk_size Integer, number of rows to process at a time for large datasets (default: 100000)
 #' @param validate_features Logical, whether to validate that specified features exist in the database (default: TRUE)
 #' @param zscore Logical, whether to apply z-score normalization to continuous data (default: FALSE)
+#' @param format Character, format of returned discrete data: "wide" (features as rows, samples as columns) or "long" (default, original database format with features and samples columns)
 #' @return Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE)
+setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long")
   standardGeneric("loadMolecularProfiles"))
 
 #' @rdname loadMolecularProfiles
 #' @export
-setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE) {
+setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long") {
   # Handle "all" molecular_type option with parallel processing
   if (molecular_type == "all") {
     # Get all available molecular profile types
@@ -280,7 +281,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
             tumor_type = tumor_type,
             chunk_size = chunk_size,
             validate_features = validate_features,
-            zscore = zscore
+            zscore = zscore,
+            format = format
           )
         }, error = function(e) {
           warning("Failed to load molecular profile '", mol_type, "': ", e$message)
@@ -308,7 +310,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
             tumor_type = tumor_type,
             chunk_size = chunk_size,
             validate_features = validate_features,
-            zscore = zscore
+            zscore = zscore,
+            format = format
           )
           all_data[[mol_type]] <- mol_data
           message("Loaded molecular profile: ", mol_type, " (",
@@ -411,7 +414,7 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
   } else if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
     # For dataframe data
     result <- load_dataframe_data(con, table_name, molecular_type, features, samples,
-                                 validate_features, return_data)
+                                 validate_features, return_data, format)
 
     # No z-score normalization for discrete data
     if (zscore) {
@@ -534,204 +537,122 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
 }
 
 # Helper function to load dataframe data
-load_dataframe_data <- function(con, table_name, molecular_type, features, samples, validate_features, return_data) {
-  # Check table structure to determine format
+load_dataframe_data <- function(con, table_name, molecular_type, features, samples, validate_features, return_data, format = "long") {
+  # Check table structure
   col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
   col_names <- col_info$name
 
-  # Detect if new format (samples as columns, features in feature_id column)
-  # New format has feature_id column and multiple sample columns
-  is_new_format <- "feature_id" %in% col_names &&
-                   ncol(col_info) > 2 &&
-                   !("features" %in% col_names) &&
-                   !("samples" %in% col_names)
+  # Standard format: features in 'features' column, samples in 'samples' column
+  # Get all unique samples from database if not specified
+  if (is.null(samples) && "samples" %in% col_names) {
+    all_samples_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
+    samples <- DBI::dbGetQuery(con, all_samples_query)$samples
+  }
+  
+  query_parts <- c("SELECT * FROM", table_name)
+  where_clauses <- c()
 
-  if (is_new_format) {
-    # New format: samples as columns, gene names in feature_id column
-    # This is similar to continuous data but with discrete values
-    # We can reuse the matrix loading logic
+  # Add feature filter
+  if (!is.null(features)) {
+    if (validate_features) {
+      feature_query <- paste0("SELECT DISTINCT features FROM ", table_name,
+                          " WHERE features IN (", paste0("'", features, "'", collapse = ","), ")")
+      existing_features <- DBI::dbGetQuery(con, feature_query)$features
 
-    # Get all sample columns (all columns except feature_id)
-    sample_cols <- setdiff(col_names, "feature_id")
+      missing_features <- setdiff(features, existing_features)
+      if (length(missing_features) > 0) {
+        warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
+      }
 
-    # Filter samples if specified
-    if (!is.null(samples)) {
-      existing_samples <- intersect(samples, sample_cols)
-      
-      if (length(existing_samples) == 0) {
-        warning("No matching samples found")
+      if (length(existing_features) == 0) {
+        warning("None of the specified features exist")
         return(data.frame())
       }
-      
-      if (length(existing_samples) < length(samples)) {
-        missing_samples <- setdiff(samples, existing_samples)
-        warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
-      }
-      
-      sample_cols <- existing_samples
+
+      features <- existing_features
     }
 
-    # Build query with selected columns
-    if (!is.null(samples)) {
-      query_parts <- c("SELECT feature_id,", paste0('"', sample_cols, '"', collapse = ", "), "FROM", table_name)
-    } else {
-      query_parts <- c("SELECT * FROM", table_name)
-    }
+    where_clauses <- c(where_clauses, paste0("features IN (", paste0("'", features, "'", collapse = ","), ")"))
+  }
 
-    where_clauses <- c()
-
-    # Add feature filter if specified
-    if (!is.null(features)) {
-      if (validate_features) {
-        feature_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name,
-                               " WHERE feature_id IN (", paste0("'", features, "'", collapse = ","), ")")
-        existing_features <- DBI::dbGetQuery(con, feature_query)$feature_id
-
-        missing_features <- setdiff(features, existing_features)
-        if (length(missing_features) > 0) {
-          warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
-        }
-
-        if (length(existing_features) == 0) {
-          warning("None of the specified features exist")
-          return(data.frame())
-        }
-
-        features <- existing_features
-      }
-
-      where_clauses <- c(where_clauses, paste0("feature_id IN (", paste0("'", features, "'", collapse = ","), ")"))
-    }
-
-    # Combine WHERE clauses
-    if (length(where_clauses) > 0) {
-      query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
-    }
-
-    query <- paste(query_parts, collapse = " ")
-    data <- DBI::dbGetQuery(con, query)
-
-    if (nrow(data) == 0) {
-      warning("No data found for molecular profile type: ", molecular_type)
+  # Add sample filter
+  if (!is.null(samples) && "samples" %in% col_names) {
+    # Verify which samples exist in the database
+    sample_check_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
+    all_db_samples <- DBI::dbGetQuery(con, sample_check_query)$samples
+    
+    existing_samples <- intersect(samples, all_db_samples)
+    
+    if (length(existing_samples) == 0) {
+      warning("No matching samples found")
       return(data.frame())
-    }
-
-    # Convert to matrix format with feature_id as row names (like continuous data)
-    feature_ids <- data$feature_id
-    data$feature_id <- NULL
-    mat <- as.matrix(data)
-    rownames(mat) <- feature_ids
-
-    return(mat)
-
-  } else {
-    # Standard format: features in 'features' column, samples in 'samples' column
-    # Get all unique samples from database if not specified
-    if (is.null(samples) && "samples" %in% col_names) {
-      all_samples_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
-      samples <- DBI::dbGetQuery(con, all_samples_query)$samples
     }
     
-    query_parts <- c("SELECT * FROM", table_name)
-    where_clauses <- c()
-
-    # Add feature filter
-    if (!is.null(features)) {
-      if (validate_features) {
-        feature_query <- paste0("SELECT DISTINCT features FROM ", table_name,
-                            " WHERE features IN (", paste0("'", features, "'", collapse = ","), ")")
-        existing_features <- DBI::dbGetQuery(con, feature_query)$features
-
-        missing_features <- setdiff(features, existing_features)
-        if (length(missing_features) > 0) {
-          warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
-        }
-
-        if (length(existing_features) == 0) {
-          warning("None of the specified features exist")
-          return(data.frame())
-        }
-
-        features <- existing_features
-      }
-
-      where_clauses <- c(where_clauses, paste0("features IN (", paste0("'", features, "'", collapse = ","), ")"))
+    if (length(existing_samples) < length(samples)) {
+      missing_samples <- setdiff(samples, existing_samples)
+      warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
     }
+    
+    where_clauses <- c(where_clauses, paste0("samples IN (", paste0("'", existing_samples, "'", collapse = ","), ")"))
+    # Update samples variable for later use in wide format conversion
+    samples <- existing_samples
+  }
 
-    # Add sample filter
-    if (!is.null(samples) && "samples" %in% col_names) {
-      # Verify which samples exist in the database
-      sample_check_query <- paste0("SELECT DISTINCT samples FROM ", table_name)
-      all_db_samples <- DBI::dbGetQuery(con, sample_check_query)$samples
-      
-      existing_samples <- intersect(samples, all_db_samples)
-      
-      if (length(existing_samples) == 0) {
-        warning("No matching samples found")
-        return(data.frame())
-      }
-      
-      if (length(existing_samples) < length(samples)) {
-        missing_samples <- setdiff(samples, existing_samples)
-        warning("The following samples do not exist: ", paste(missing_samples, collapse = ", "))
-      }
-      
-      where_clauses <- c(where_clauses, paste0("samples IN (", paste0("'", existing_samples, "'", collapse = ","), ")"))
-      # Update samples variable for later use in wide format conversion
-      samples <- existing_samples
-    }
+  # Combine WHERE clauses
+  if (length(where_clauses) > 0) {
+    query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
+  }
 
-    # Combine WHERE clauses
-    if (length(where_clauses) > 0) {
-      query_parts <- c(query_parts, "WHERE", paste(where_clauses, collapse = " AND "))
-    }
+  query <- paste(query_parts, collapse = " ")
+  data <- DBI::dbGetQuery(con, query)
 
-    query <- paste(query_parts, collapse = " ")
-    data <- DBI::dbGetQuery(con, query)
+  if (nrow(data) == 0) {
+    warning("No data found for molecular profile type: ", molecular_type)
+    return(data.frame())
+  }
 
-    if (nrow(data) == 0) {
-      warning("No data found for molecular profile type: ", molecular_type)
+  # If format is "long", return the data directly without conversion
+  if (format == "long") {
+    return(data)
+  }
+
+  # Reshape long format to wide format for consistency
+  if ("features" %in% colnames(data) && "samples" %in% colnames(data)) {
+    # Convert from long to wide format
+    message("Converting long discrete data format to wide format...")
+
+    # Get unique features and samples
+    unique_features <- unique(data$features)
+    # Use all samples (from database query or specified parameter)
+    # This ensures samples without mutations are included and marked as 0
+    unique_samples <- samples
+
+    if (length(unique_features) == 0 || length(unique_samples) == 0) {
       return(data.frame())
     }
 
-    # Reshape long format to wide format for consistency
-    if ("features" %in% colnames(data) && "samples" %in% colnames(data)) {
-      # Convert from long to wide format
-      message("Converting long discrete data format to wide format...")
+    # Create wide format matrix initialized with 0 (no mutation)
+    wide_data <- matrix(0, nrow = length(unique_features), ncol = length(unique_samples))
+    rownames(wide_data) <- unique_features
+    colnames(wide_data) <- unique_samples
 
-      # Get unique features and samples
-      unique_features <- unique(data$features)
-      # Use all samples (from database query or specified parameter)
-      # This ensures samples without mutations are included and marked as 0
-      unique_samples <- samples
-
-      if (length(unique_features) == 0 || length(unique_samples) == 0) {
-        return(data.frame())
-      }
-
-      # Create wide format matrix initialized with 0 (no mutation)
-      wide_data <- matrix(0, nrow = length(unique_features), ncol = length(unique_samples))
-      rownames(wide_data) <- unique_features
-      colnames(wide_data) <- unique_samples
-
-      # Fill in values using vectorized indexing (mark mutations with 1)
-      indices <- cbind(
-        match(data$features, unique_features),
-        match(data$samples, unique_samples)
-      )
-      valid_idx <- !is.na(indices[,1]) & !is.na(indices[,2])
-      if (any(valid_idx)) {
-        wide_data[indices[valid_idx, , drop = FALSE]] <- 1
-      }
-
-      # Return as matrix with feature names as row names
-      return(wide_data)
+    # Fill in values using vectorized indexing (mark mutations with 1)
+    indices <- cbind(
+      match(data$features, unique_features),
+      match(data$samples, unique_samples)
+    )
+    valid_idx <- !is.na(indices[,1]) & !is.na(indices[,2])
+    if (any(valid_idx)) {
+      wide_data[indices[valid_idx, , drop = FALSE]] <- 1
     }
 
-    # If we reach here with data that couldn't be converted,
-    # return empty matrix
-    return(matrix(nrow = 0, ncol = 0))
+    # Return as matrix with feature names as row names
+    return(wide_data)
   }
+
+  # If we reach here with data that couldn't be converted,
+  # return empty matrix
+  return(matrix(nrow = 0, ncol = 0))
 }
 
 # Helper function for chunked loading
