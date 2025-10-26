@@ -7,8 +7,8 @@
 \usage{
 loadMolecularProfiles(
   object,
-  molecular_type,
-  features = NULL,
+  feature_type,
+  select_features = NULL,
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
@@ -21,8 +21,8 @@ loadMolecularProfiles(
 
 \S4method{loadMolecularProfiles}{DromaSet}(
   object,
-  molecular_type,
-  features = NULL,
+  feature_type,
+  select_features = NULL,
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
@@ -36,9 +36,9 @@ loadMolecularProfiles(
 \arguments{
 \item{object}{A DromaSet object}
 
-\item{molecular_type}{The type of molecular data to load (e.g., "mRNA", "cnv", "mutation_gene") or "all" to load all available types}
+\item{feature_type}{The type of molecular data to load (e.g., "mRNA", "cnv", "mutation_gene") or "all" to load all available types}
 
-\item{features}{Optional vector of feature names to load. If NULL, loads all features.}
+\item{select_features}{Optional vector of feature names to load. If NULL, loads all features.}
 
 \item{samples}{Optional vector of sample IDs to load. If NULL, loads all samples.}
 

@@ -7,7 +7,7 @@
 addDromaSetToMulti(
   multi_set,
   droma_set,
-  project_name = NULL,
+  projects = NULL,
   update_metadata = TRUE
 )
 }
@@ -16,7 +16,7 @@ addDromaSetToMulti(
 
 \item{droma_set}{A DromaSet object to add}
 
-\item{project_name}{Optional character, name for the new project (will use DromaSet name if not provided)}
+\item{projects}{Optional character, name for the new project (will use DromaSet name if not provided)}
 
 \item{update_metadata}{Logical, whether to update merged metadata (default: TRUE)}
 }

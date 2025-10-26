@@ -6,7 +6,7 @@
 \usage{
 getDROMAAnnotation(
   anno_type,
-  project_name = NULL,
+  projects = NULL,
   ids = NULL,
   data_type = "all",
   tumor_type = "all",
@@ -17,7 +17,7 @@ getDROMAAnnotation(
 \arguments{
 \item{anno_type}{Character, type of annotation to retrieve: "sample" or "drug"}
 
-\item{project_name}{Character, optional project name to filter results (default: NULL for all projects)}
+\item{projects}{Character, optional project name to filter results (default: NULL for all projects)}
 
 \item{ids}{Character vector, optional specific IDs to retrieve (SampleID for samples, DrugName for drugs)}
 
@@ -44,7 +44,7 @@ con <- connectDROMADatabase("path/to/droma.sqlite")
 sample_anno <- getDROMAAnnotation("sample")
 
 # Get sample annotations for gCSI project only
-gCSI_samples <- getDROMAAnnotation("sample", project_name = "gCSI")
+gCSI_samples <- getDROMAAnnotation("sample", projects = "gCSI")
 
 # Get sample annotations for specific samples
 specific_samples <- getDROMAAnnotation("sample", ids = c("22RV1", "2313287"))
@@ -59,7 +59,7 @@ breast_samples <- getDROMAAnnotation("sample", tumor_type = "breast cancer")
 drug_anno <- getDROMAAnnotation("drug")
 
 # Get drug annotations for gCSI project only
-gCSI_drugs <- getDROMAAnnotation("drug", project_name = "gCSI")
+gCSI_drugs <- getDROMAAnnotation("drug", projects = "gCSI")
 
 # Get annotations for specific drugs
 specific_drugs <- getDROMAAnnotation("drug", ids = c("Tamoxifen", "Cisplatin"))

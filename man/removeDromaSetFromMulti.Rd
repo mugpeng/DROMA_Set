@@ -4,12 +4,12 @@
 \alias{removeDromaSetFromMulti}
 \title{Remove DromaSet from MultiDromaSet}
 \usage{
-removeDromaSetFromMulti(multi_set, project_name, update_metadata = TRUE)
+removeDromaSetFromMulti(multi_set, projects, update_metadata = TRUE)
 }
 \arguments{
 \item{multi_set}{A MultiDromaSet object}
 
-\item{project_name}{Character, name of the project to remove}
+\item{projects}{Character, name of the project to remove}
 
 \item{update_metadata}{Logical, whether to update merged metadata (default: TRUE)}
 }

@@ -7,7 +7,7 @@
 updateDROMAAnnotation(
   anno_type,
   name_mapping,
-  project_name,
+  projects,
   data_type = NA_character_,
   tumor_type = NA_character_,
   PatientID = NA_character_,
@@ -23,7 +23,7 @@ updateDROMAAnnotation(
 
 \item{name_mapping}{Data frame with name mappings containing at minimum: original_name, new_name, match_confidence columns}
 
-\item{project_name}{Character, the project name to assign to new entries}
+\item{projects}{Character, the project name to assign to new entries}
 
 \item{data_type}{Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)}
 
@@ -60,12 +60,12 @@ con <- connectDROMADatabase("path/to/droma.sqlite")
 sample_mapping <- checkDROMASampleNames(colnames(my_data))
 
 # Update sample annotations with single values
-updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+updateDROMAAnnotation("sample", sample_mapping, projects = "MyProject",
                      data_type = "CellLine", tumor_type = "breast cancer",
                      PatientID = "Patient_001", Gender = "Female", Age = 45)
 
 # Update sample annotations with vectors (one value per sample)
-updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+updateDROMAAnnotation("sample", sample_mapping, projects = "MyProject",
                      data_type = c("CellLine", "PDX", "CellLine", "PDO"),
                      tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
                      PatientID = c("Patient_001", "Patient_002", "Patient_003", "Patient_004"),
@@ -78,6 +78,6 @@ updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
 drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
 
 # Update drug annotations (PatientID not used for drugs)
-updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
+updateDROMAAnnotation("drug", drug_mapping, projects = "MyProject")
 }
 }

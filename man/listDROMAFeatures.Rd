@@ -5,8 +5,8 @@
 \title{List Available Features in DROMA Database}
 \usage{
 listDROMAFeatures(
-  project_name,
-  data_sources,
+  projects,
+  feature_type,
   data_type = "all",
   tumor_type = "all",
   connection = NULL,
@@ -15,9 +15,9 @@ listDROMAFeatures(
 )
 }
 \arguments{
-\item{project_name}{Character, the name of the project (e.g., "gCSI", "CCLE")}
+\item{projects}{Character, the name of the project (e.g., "gCSI", "CCLE")}
 
-\item{data_sources}{Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")}
+\item{feature_type}{Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")}
 
 \item{data_type}{Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
 

@@ -125,18 +125,18 @@ updateDROMADatabase <- function(obj, table_name, overwrite = FALSE, connection =
 #' Retrieve Feature Data from DROMA Database
 #'
 #' @description Fetches specific feature data from the DROMA database based on selection criteria
-#' @param select_feas_type The type of feature to select (e.g., "mRNA", "cnv", "drug")
-#' @param select_feas The specific feature to select within the feature type (default: "all" to select entire table)
-#' @param data_sources Vector of data sources to select from (e.g., c("ccle", "gdsc"))
+#' @param feature_type The type of feature to select (e.g., "mRNA", "cnv", "drug")
+#' @param select_features The specific feature to select within the feature type (default: "all" to select entire table)
+#' @param projects Vector of projects to select from (e.g., c("ccle", "gdsc"))
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or specific tumor type
 #' @param connection Optional database connection object. If NULL, uses global connection.
-#' @return A list of selected features from specified data sources
+#' @return A list of selected features from specified projects
 #' @export
 #' @note This function is provided for backward compatibility. For new code, consider
 #' using the DromaSet object approach instead.
-getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
-                                 data_sources = "all",
+getFeatureFromDatabase <- function(feature_type, select_features = "all",
+                                 projects = "all",
                                  data_type = "all", tumor_type = "all",
                                  connection = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
@@ -153,21 +153,21 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
 
   # Get data source tables that match the feature type
   all_tables <- DBI::dbListTables(connection)
-  pattern <- paste0("_", select_feas_type, "$")
+  pattern <- paste0("_", feature_type, "$")
   feature_tables <- grep(pattern, all_tables, value = TRUE)
 
   if (length(feature_tables) == 0) {
-    stop("No tables found for feature type: ", select_feas_type)
+    stop("No tables found for feature type: ", feature_type)
   }
 
-  # Filter by data sources if specified
-  if (!identical(data_sources, "all")) {
-    feature_tables <- grep(paste0("^(", paste(data_sources, collapse = "|"), ")_"),
+  # Filter by projects if specified
+  if (!identical(projects, "all")) {
+    feature_tables <- grep(paste0("^(", paste(projects, collapse = "|"), ")_"),
                            feature_tables, value = TRUE)
   }
 
   if (length(feature_tables) == 0) {
-    stop("No matching tables found for the specified data sources")
+    stop("No matching tables found for the specified projects")
   }
 
   # Get sample IDs from sample_anno based on data_type and tumor_type
@@ -197,12 +197,12 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
 
   for (table in feature_tables) {
     # Extract data source name from table name
-    data_source <- sub(paste0("_", select_feas_type, "$"), "", table)
+    data_source <- sub(paste0("_", feature_type, "$"), "", table)
 
     # Query for the specified feature or entire table
-    if (select_feas_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+    if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
       # For continuous data
-      if (select_feas == "all") {
+      if (select_features == "all") {
         # Get entire table
         query <- paste0("SELECT * FROM ", table)
         feature_data <- DBI::dbGetQuery(connection, query)
@@ -222,7 +222,7 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
         }
       } else {
         # Get the row for the specific feature
-        query <- paste0("SELECT * FROM ", table, " WHERE feature_id = '", select_feas, "'")
+        query <- paste0("SELECT * FROM ", table, " WHERE feature_id = '", select_features, "'")
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
@@ -235,7 +235,7 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
       }
     } else {
       # For discrete data like mutations
-      if (select_feas == "all") {
+      if (select_features == "all") {
         # Get entire table
         query <- paste0("SELECT * FROM ", table)
         feature_data <- DBI::dbGetQuery(connection, query)
@@ -247,20 +247,20 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
         feature_vector <- feature_data
       } else {
         # Get sample IDs where specific feature is present
-        query <- paste0("SELECT cells FROM ", table, " WHERE gene = '", select_feas, "'")
+        query <- paste0("SELECT samples FROM ", table, " WHERE gene = '", select_features, "'")
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
           next  # Skip if feature not found
         }
 
-        feature_vector <- feature_data$cells
+        feature_vector <- feature_data$samples
       }
     }
 
     # Filter by samples if needed
     if (!is.null(filtered_samples)) {
-      if (select_feas_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+      if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
         common_samples <- intersect(names(feature_vector), filtered_samples)
         if (length(common_samples) == 0) {
           next  # Skip if no samples match the filter
@@ -279,7 +279,7 @@ getFeatureFromDatabase <- function(select_feas_type, select_feas = "all",
   }
 
   if (length(result_list) == 0) {
-    stop("No data found for feature '", select_feas, "' with the specified criteria")
+    stop("No data found for feature '", select_features, "' with the specified criteria")
   }
 
   return(result_list)
@@ -504,7 +504,7 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
 
   # Create a data frame with project information
   result <- data.frame(
-    project_name = project_names,
+    projects = project_names,
     stringsAsFactors = FALSE
   )
 
@@ -519,7 +519,7 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
 #' the projects table accordingly. If a project already exists, it updates the metadata;
 #' if it's new, it adds a new entry.
 #'
-#' @param project_name Character, the name of the project to update (e.g., "gCSI", "CCLE").
+#' @param projects Character, the name of the project to update (e.g., "gCSI", "CCLE").
 #'   If NULL, updates all projects found in the database.
 #' @param dataset_type Character, the dataset type to assign to the project(s) (e.g., "CellLine", "PDX", "PDO").
 #'   If NULL, attempts to guess from sample_anno table (default: NULL)
@@ -542,7 +542,7 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
 #' # Update all projects in the database (auto-detect dataset type)
 #' updateDROMAProjects()
 #' }
-updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connection = NULL, create_table = TRUE) {
+updateDROMAProjects <- function(projects = NULL, dataset_type = NULL, connection = NULL, create_table = TRUE) {
   if (!requireNamespace("DBI", quietly = TRUE) ||
       !requireNamespace("RSQLite", quietly = TRUE)) {
     stop("Packages 'DBI' and 'RSQLite' are required. Please install them with install.packages(c('DBI', 'RSQLite'))")
@@ -560,7 +560,7 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
   all_tables <- DBI::dbListTables(connection)
 
   # Extract project names from table names
-  if (is.null(project_name)) {
+  if (is.null(projects)) {
     # Get all project names from tables, excluding backup tables
     project_names <- unique(sapply(all_tables, function(t) {
       parts <- strsplit(t, "_")[[1]]
@@ -576,7 +576,7 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
     project_names <- project_names[!is.na(project_names)]
   } else {
     # Use specified project name
-    project_names <- project_name
+    project_names <- projects
   }
 
   if (length(project_names) == 0) {
@@ -759,8 +759,8 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
 #' List Available Features in DROMA Database
 #'
 #' @description Lists all available features (genes, drugs, etc.) for a specific project and data type
-#' @param project_name Character, the name of the project (e.g., "gCSI", "CCLE")
-#' @param data_sources Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")
+#' @param projects Character, the name of the project (e.g., "gCSI", "CCLE")
+#' @param feature_type Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")
 #' @param data_type Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Character, filter by tumor type: "all" (default) or specific tumor type
 #' @param connection Optional database connection object. If NULL, uses global connection
@@ -791,7 +791,7 @@ updateDROMAProjects <- function(project_name = NULL, dataset_type = NULL, connec
 #' # List first 100 features
 #' top_genes <- listDROMAFeatures("gCSI", "mRNA", limit = 100)
 #' }
-listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tumor_type = "all",
+listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_type = "all",
                              connection = NULL, limit = NULL, pattern = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
@@ -806,13 +806,13 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
   }
 
   # Construct table name
-  table_name <- paste0(project_name, "_", data_sources)
+  table_name <- paste0(projects, "_", feature_type)
 
   # Check if table exists
   all_tables <- DBI::dbListTables(connection)
   if (!table_name %in% all_tables) {
     stop("Table '", table_name, "' not found. Available tables: ",
-         paste(grep(paste0("^", project_name, "_"), all_tables, value = TRUE), collapse = ", "))
+         paste(grep(paste0("^", projects, "_"), all_tables, value = TRUE), collapse = ", "))
   }
 
   # Get filtered sample IDs if data_type or tumor_type filters are specified
@@ -824,7 +824,7 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
     } else {
       # Construct query for sample filtering
       sample_query <- "SELECT DISTINCT SampleID FROM sample_anno WHERE ProjectID = ?"
-      sample_params <- list(project_name)
+      sample_params <- list(projects)
 
       if (data_type != "all") {
         sample_query <- paste0(sample_query, " AND DataType = ?")
@@ -846,19 +846,19 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
         if(tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
         filter_desc <- paste0(" with ", paste(filter_parts, collapse = " and "))
 
-        message("No samples found for project '", project_name, "'", filter_desc)
+        message("No samples found for project '", projects, "'", filter_desc)
         return(character(0))
       }
     }
   }
 
   # Determine the column name based on data type
-  if (data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+  if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
     # For continuous data, features are in feature_id column
     feature_column <- "feature_id"
-  } else if (data_sources %in% c("mutation_gene", "mutation_site", "fusion")) {
+  } else if (feature_type %in% c("mutation_gene", "mutation_site", "fusion")) {
     # For discrete data, features are in genes column
-    feature_column <- "genes"
+    feature_column <- "features"
   } else {
     # Try to detect the column automatically
     # Get column names from the table
@@ -867,16 +867,16 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
 
     if ("feature_id" %in% columns_info$name) {
       feature_column <- "feature_id"
-    } else if ("genes" %in% columns_info$name) {
-      feature_column <- "genes"
+    } else if ("features" %in% columns_info$name) {
+      feature_column <- "features"
     } else {
-      stop("Cannot determine feature column for data type '", data_sources,
+      stop("Cannot determine feature column for data type '", feature_type,
            "'. Available columns: ", paste(columns_info$name, collapse = ", "))
     }
   }
 
   # For continuous data types, we need to check which features have data for the filtered samples
-  if (!is.null(filtered_samples) && data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+  if (!is.null(filtered_samples) && feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
     # Get column names from the table to see which samples have data
     columns_query <- paste0("PRAGMA table_info(", table_name, ")")
     columns_info <- DBI::dbGetQuery(connection, columns_query)
@@ -990,10 +990,10 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
 #' List Available Samples in DROMA Database
 #'
 #' @description Lists all available samples for a specific project, optionally filtered by data type or tumor type
-#' @param project_name Character, the name of the project (e.g., "gCSI", "CCLE")
+#' @param projects Character, the name of the project (e.g., "gCSI", "CCLE")
+#' @param feature_type Character, filter by feature type: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")
 #' @param data_type Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Character, filter by tumor type: "all" (default) or specific tumor type
-#' @param data_sources Character, filter by data sources: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @param limit Integer, maximum number of samples to return (default: NULL for all samples)
 #' @param pattern Character, optional regex pattern to filter sample names
@@ -1014,7 +1014,7 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
 #' breast_samples <- listDROMASamples("gCSI", tumor_type = "breast cancer")
 #'
 #' # List samples with mRNA data
-#' mrna_samples <- listDROMASamples("gCSI", data_sources = "mRNA")
+#' mrna_samples <- listDROMASamples("gCSI", feature_type = "mRNA")
 #'
 #' # List first 50 samples
 #' top_samples <- listDROMASamples("gCSI", limit = 50)
@@ -1022,7 +1022,7 @@ listDROMAFeatures <- function(project_name, data_sources, data_type = "all", tum
 #' # List samples matching a pattern
 #' mcf_samples <- listDROMASamples("gCSI", pattern = "^MCF")
 #' }
-listDROMASamples <- function(project_name, data_sources = "all", data_type = "all", tumor_type = "all",
+listDROMASamples <- function(projects, feature_type = "all", data_type = "all", tumor_type = "all",
                             connection = NULL, limit = NULL, pattern = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
@@ -1042,39 +1042,39 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
     stop("Sample annotation table 'sample_anno' not found in database")
   }
 
-  # Get samples with data_sources filter if specified
+  # Get samples with feature_type filter if specified
   filtered_samples_by_data <- NULL
-  if (data_sources != "all") {
-    # Construct table name for the data source
-    data_table_name <- paste0(project_name, "_", data_sources)
+  if (feature_type != "all") {
+    # Construct table name for the feature type
+    data_table_name <- paste0(projects, "_", feature_type)
 
-    # Check if the data source table exists
+    # Check if the feature type table exists
     if (!data_table_name %in% all_tables) {
-      stop("Data source table '", data_table_name, "' not found. Available tables: ",
-           paste(grep(paste0("^", project_name, "_"), all_tables, value = TRUE), collapse = ", "))
+      stop("Feature type table '", data_table_name, "' not found. Available tables: ",
+           paste(grep(paste0("^", projects, "_"), all_tables, value = TRUE), collapse = ", "))
     }
 
-    # Get samples that have data in this data source
-    if (data_sources %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+    # Get samples that have data in this feature type
+    if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
       # For continuous data, get column names (excluding feature_id)
       columns_query <- paste0("PRAGMA table_info(", data_table_name, ")")
       columns_info <- DBI::dbGetQuery(connection, columns_query)
       filtered_samples_by_data <- columns_info$name[columns_info$name != "feature_id"]
-    } else if (data_sources %in% c("mutation_gene", "mutation_site", "fusion")) {
-      # For discrete data, get unique values from cells column
-      discrete_query <- paste0("SELECT DISTINCT cells FROM ", data_table_name, " WHERE cells IS NOT NULL")
+    } else if (feature_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+      # For discrete data, get unique values from samples column
+      discrete_query <- paste0("SELECT DISTINCT samples FROM ", data_table_name, " WHERE samples IS NOT NULL")
       discrete_result <- DBI::dbGetQuery(connection, discrete_query)
-      filtered_samples_by_data <- discrete_result$cells
+      filtered_samples_by_data <- discrete_result$samples
     } else {
       # Try to detect automatically
       columns_query <- paste0("PRAGMA table_info(", data_table_name, ")")
       columns_info <- DBI::dbGetQuery(connection, columns_query)
 
-      if ("cells" %in% columns_info$name) {
+      if ("samples" %in% columns_info$name) {
         # Discrete data
-        discrete_query <- paste0("SELECT DISTINCT cells FROM ", data_table_name, " WHERE cells IS NOT NULL")
+        discrete_query <- paste0("SELECT DISTINCT samples FROM ", data_table_name, " WHERE samples IS NOT NULL")
         discrete_result <- DBI::dbGetQuery(connection, discrete_query)
-        filtered_samples_by_data <- discrete_result$cells
+        filtered_samples_by_data <- discrete_result$samples
       } else {
         # Continuous data
         filtered_samples_by_data <- columns_info$name[columns_info$name != "feature_id"]
@@ -1082,14 +1082,14 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
     }
 
     if (length(filtered_samples_by_data) == 0) {
-      message("No samples found with data in '", data_sources, "' for project '", project_name, "'")
+      message("No samples found with data in '", feature_type, "' for project '", projects, "'")
       return(character(0))
     }
   }
 
   # Construct query
   query <- "SELECT DISTINCT SampleID FROM sample_anno WHERE ProjectID = ?"
-  params <- list(project_name)
+  params <- list(projects)
 
   # Add data type filter
   if (data_type != "all") {
@@ -1162,25 +1162,25 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
       filter_parts <- c()
       if(data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
       if(tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
-      if(data_sources != "all") filter_parts <- c(filter_parts, paste0("data_sources='", data_sources, "'"))
+      if(feature_type != "all") filter_parts <- c(filter_parts, paste0("feature_type='", feature_type, "'"))
       if(!is.null(pattern)) filter_parts <- c(filter_parts, paste0("pattern='", pattern, "'"))
 
       filter_desc <- if(length(filter_parts) > 0) paste0(" with ", paste(filter_parts, collapse = " and ")) else ""
 
-      message("No samples found for project '", project_name, "'", filter_desc)
+      message("No samples found for project '", projects, "'", filter_desc)
       return(character(0))
     }
 
     # Print summary information
     total_query <- "SELECT COUNT(DISTINCT SampleID) as total FROM sample_anno WHERE ProjectID = ?"
-    total_result <- DBI::dbGetQuery(connection, total_query, params = list(project_name))
+    total_result <- DBI::dbGetQuery(connection, total_query, params = list(projects))
     total_samples <- total_result$total
 
     filter_desc <- ""
     filters <- c()
     if (data_type != "all") filters <- c(filters, paste0("data_type='", data_type, "'"))
     if (tumor_type != "all") filters <- c(filters, paste0("tumor_type='", tumor_type, "'"))
-    if (data_sources != "all") filters <- c(filters, paste0("data_sources='", data_sources, "'"))
+    if (feature_type != "all") filters <- c(filters, paste0("feature_type='", feature_type, "'"))
     if (!is.null(pattern)) filters <- c(filters, paste0("pattern='", pattern, "'"))
 
     if (length(filters) > 0) {
@@ -1189,20 +1189,20 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
 
     if (!is.null(limit)) {
       message("Showing first ", length(samples), " samples out of ", total_samples,
-              " total samples for project '", project_name, "'", filter_desc)
+              " total samples for project '", projects, "'", filter_desc)
     } else {
-      if (!is.null(pattern) || data_sources != "all") {
+      if (!is.null(pattern) || feature_type != "all") {
         message("Found ", length(samples), " samples out of ", total_samples,
-                " total samples for project '", project_name, "'", filter_desc)
+                " total samples for project '", projects, "'", filter_desc)
       } else {
-        message("Found ", length(samples), " samples for project '", project_name, "'", filter_desc)
+        message("Found ", length(samples), " samples for project '", projects, "'", filter_desc)
       }
     }
 
     return(samples)
 
   }, error = function(e) {
-    stop("Error querying samples for project '", project_name, "': ", e$message)
+    stop("Error querying samples for project '", projects, "': ", e$message)
   })
 }
 
@@ -1210,7 +1210,7 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
 #'
 #' @description Retrieves annotation data from either sample_anno or drug_anno tables
 #' @param anno_type Character, type of annotation to retrieve: "sample" or "drug"
-#' @param project_name Character, optional project name to filter results (default: NULL for all projects)
+#' @param projects Character, optional project name to filter results (default: NULL for all projects)
 #' @param ids Character vector, optional specific IDs to retrieve (SampleID for samples, DrugName for drugs)
 #' @param data_type Character, for sample annotations only: filter by data type ("all", "CellLine", "PDO", "PDC", "PDX")
 #' @param tumor_type Character, for sample annotations only: filter by tumor type ("all" or specific type)
@@ -1227,7 +1227,7 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
 #' sample_anno <- getDROMAAnnotation("sample")
 #'
 #' # Get sample annotations for gCSI project only
-#' gCSI_samples <- getDROMAAnnotation("sample", project_name = "gCSI")
+#' gCSI_samples <- getDROMAAnnotation("sample", projects = "gCSI")
 #'
 #' # Get sample annotations for specific samples
 #' specific_samples <- getDROMAAnnotation("sample", ids = c("22RV1", "2313287"))
@@ -1242,12 +1242,12 @@ listDROMASamples <- function(project_name, data_sources = "all", data_type = "al
 #' drug_anno <- getDROMAAnnotation("drug")
 #'
 #' # Get drug annotations for gCSI project only
-#' gCSI_drugs <- getDROMAAnnotation("drug", project_name = "gCSI")
+#' gCSI_drugs <- getDROMAAnnotation("drug", projects = "gCSI")
 #'
 #' # Get annotations for specific drugs
 #' specific_drugs <- getDROMAAnnotation("drug", ids = c("Tamoxifen", "Cisplatin"))
 #' }
-getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
+getDROMAAnnotation <- function(anno_type, projects = NULL, ids = NULL,
                               data_type = "all", tumor_type = "all",
                               connection = NULL, limit = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
@@ -1289,9 +1289,9 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
   params <- list()
 
   # Add project filter
-  if (!is.null(project_name)) {
+  if (!is.null(projects)) {
     query <- paste0(query, " AND ", project_column, " = ?")
-    params <- append(params, project_name)
+    params <- append(params, projects)
   }
 
   # Add ID filter
@@ -1336,8 +1336,8 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
       filter_desc <- ""
       filters <- c()
 
-      if (!is.null(project_name)) {
-        filters <- c(filters, paste0("project='", project_name, "'"))
+      if (!is.null(projects)) {
+        filters <- c(filters, paste0("project='", projects, "'"))
       }
       if (!is.null(ids)) {
         filters <- c(filters, paste0("specific IDs (", length(ids), " requested)"))
@@ -1365,12 +1365,12 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
     total_records <- total_result$total
 
     filter_desc <- ""
-    if (!is.null(project_name) || !is.null(ids) ||
+    if (!is.null(projects) || !is.null(ids) ||
         (anno_type == "sample" && (data_type != "all" || tumor_type != "all"))) {
       filters <- c()
 
-      if (!is.null(project_name)) {
-        filters <- c(filters, paste0("project='", project_name, "'"))
+      if (!is.null(projects)) {
+        filters <- c(filters, paste0("project='", projects, "'"))
       }
       if (!is.null(ids)) {
         filters <- c(filters, paste0("specific IDs"))
@@ -1411,7 +1411,7 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
 #'
 #' @param anno_type Character, type of annotation to update: "sample" or "drug"
 #' @param name_mapping Data frame with name mappings containing at minimum: original_name, new_name, match_confidence columns
-#' @param project_name Character, the project name to assign to new entries
+#' @param projects Character, the project name to assign to new entries
 #' @param data_type Character or character vector, the data type(s) to assign to new sample entries (e.g., "CellLine", "PDC", "PDX"). Can be a single value (applied to all) or a vector matching the length of name_mapping (only for sample annotations)
 #' @param tumor_type Character or character vector, the tumor type(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
 #' @param PatientID Character or character vector, the patient ID(s) to assign to new sample entries. Can be a single value (applied to all) or a vector matching the length of name_mapping (default: NA, only for sample annotations)
@@ -1431,12 +1431,12 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
 #' sample_mapping <- checkDROMASampleNames(colnames(my_data))
 #'
 #' # Update sample annotations with single values
-#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+#' updateDROMAAnnotation("sample", sample_mapping, projects = "MyProject",
 #'                      data_type = "CellLine", tumor_type = "breast cancer",
 #'                      PatientID = "Patient_001", Gender = "Female", Age = 45)
 #'
 #' # Update sample annotations with vectors (one value per sample)
-#' updateDROMAAnnotation("sample", sample_mapping, project_name = "MyProject",
+#' updateDROMAAnnotation("sample", sample_mapping, projects = "MyProject",
 #'                      data_type = c("CellLine", "PDX", "CellLine", "PDO"),
 #'                      tumor_type = c("breast cancer", "lung cancer", "breast cancer", "colon cancer"),
 #'                      PatientID = c("Patient_001", "Patient_002", "Patient_003", "Patient_004"),
@@ -1449,9 +1449,9 @@ getDROMAAnnotation <- function(anno_type, project_name = NULL, ids = NULL,
 #' drug_mapping <- checkDROMADrugNames(rownames(my_drug_data))
 #'
 #' # Update drug annotations (PatientID not used for drugs)
-#' updateDROMAAnnotation("drug", drug_mapping, project_name = "MyProject")
+#' updateDROMAAnnotation("drug", drug_mapping, projects = "MyProject")
 #' }
-updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_type = NA_character_,
+updateDROMAAnnotation <- function(anno_type, name_mapping, projects, data_type = NA_character_,
                                   tumor_type = NA_character_, PatientID = NA_character_, Gender = NA_character_,
                                   Age = NA_real_, FullEthnicity = NA_character_,
                                   SimpleEthnicity = NA_character_, connection = NULL) {
@@ -1598,9 +1598,9 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
 
     # Check if this SampleID/DrugName + ProjectID combination already exists
     if (anno_type == "sample") {
-      existing_check <- which(existing_anno$SampleID == new_name & existing_anno$ProjectID == project_name)
+      existing_check <- which(existing_anno$SampleID == new_name & existing_anno$ProjectID == projects)
     } else {
-      existing_check <- which(existing_anno$DrugName == new_name & existing_anno$ProjectID == project_name)
+      existing_check <- which(existing_anno$DrugName == new_name & existing_anno$ProjectID == projects)
     }
 
     if (length(existing_check) > 0) {
@@ -1662,7 +1662,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
           DBI::dbExecute(connection, insert_query, params = list(
             new_name,
             if("PatientID" %in% colnames(original_entry)) original_entry$PatientID else current_patient_id,
-            project_name,
+            projects,
             if("HarmonizedIdentifier" %in% colnames(original_entry)) original_entry$HarmonizedIdentifier else NA_character_,
             # Use original values from existing annotation
             if("TumorType" %in% colnames(original_entry)) original_entry$TumorType else NA_character_,
@@ -1686,7 +1686,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
       DBI::dbExecute(connection, insert_query, params = list(
             new_name,
-            project_name,
+            projects,
             if("Harmonized ID (Pubchem ID)" %in% colnames(original_entry)) original_entry$`Harmonized ID (Pubchem ID)` else NA_character_,
             if("Source for Clinical Information" %in% colnames(original_entry)) original_entry$`Source for Clinical Information` else NA_character_,
             if("Clinical Phase" %in% colnames(original_entry)) original_entry$`Clinical Phase` else NA_character_,
@@ -1706,7 +1706,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                  "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                   DBI::dbExecute(connection, insert_query, params = list(
-          new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
+          new_name, current_patient_id, projects, NA_character_, current_tumor_type,
           NA_character_, current_gender, current_age, current_full_ethnicity, current_simple_ethnicity,
           NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
         ))
@@ -1716,7 +1716,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                  "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
           DBI::dbExecute(connection, insert_query, params = list(
-            new_name, project_name, NA_character_, NA_character_,
+            new_name, projects, NA_character_, NA_character_,
             NA_character_, NA_character_, NA_character_, original_name, new_index_id
           ))
         }
@@ -1731,7 +1731,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                "TNMstage, Primary_Metastasis, DataType, ProjectRawName, AlternateName, IndexID) ",
                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         DBI::dbExecute(connection, insert_query, params = list(
-          new_name, current_patient_id, project_name, NA_character_, current_tumor_type,
+          new_name, current_patient_id, projects, NA_character_, current_tumor_type,
           NA_character_, current_gender, current_age, current_full_ethnicity, current_simple_ethnicity,
           NA_character_, NA_character_, current_data_type, original_name, NA_character_, new_index_id
         ))
@@ -1741,7 +1741,7 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
                                "`Clinical Phase`, MOA, Targets, ProjectRawName, IndexID) ",
                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         DBI::dbExecute(connection, insert_query, params = list(
-          new_name, project_name, NA_character_, NA_character_,
+          new_name, projects, NA_character_, NA_character_,
           NA_character_, NA_character_, NA_character_, original_name, new_index_id
         ))
       }
@@ -1755,14 +1755,14 @@ updateDROMAAnnotation <- function(anno_type, name_mapping, project_name, data_ty
     if ("projects" %in% all_tables) {
       # Check if project exists and has NA created_date
       check_query <- "SELECT created_date FROM projects WHERE project_name = ?"
-      existing_project <- DBI::dbGetQuery(connection, check_query, params = list(project_name))
+      existing_project <- DBI::dbGetQuery(connection, check_query, params = list(projects))
 
       if (nrow(existing_project) > 0 && is.na(existing_project$created_date[1])) {
         # Update created_date to current time
         current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
         update_query <- "UPDATE projects SET created_date = ? WHERE project_name = ?"
-        DBI::dbExecute(connection, update_query, params = list(current_time, project_name))
-        message("  Updated created_date for project '", project_name, "' to ", current_time)
+        DBI::dbExecute(connection, update_query, params = list(current_time, projects))
+        message("  Updated created_date for project '", projects, "' to ", current_time)
       }
     }
   }

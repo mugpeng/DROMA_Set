@@ -5,8 +5,8 @@
 \title{List Available Samples in DROMA Database}
 \usage{
 listDROMASamples(
-  project_name,
-  data_sources = "all",
+  projects,
+  feature_type = "all",
   data_type = "all",
   tumor_type = "all",
   connection = NULL,
@@ -15,9 +15,9 @@ listDROMASamples(
 )
 }
 \arguments{
-\item{project_name}{Character, the name of the project (e.g., "gCSI", "CCLE")}
+\item{projects}{Character, the name of the project (e.g., "gCSI", "CCLE")}
 
-\item{data_sources}{Character, filter by data sources: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")}
+\item{feature_type}{Character, filter by feature type: "all" (default) or specific data type (e.g., "mRNA", "cnv", "drug")}
 
 \item{data_type}{Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
 
@@ -50,7 +50,7 @@ cell_lines <- listDROMASamples("gCSI", data_type = "CellLine")
 breast_samples <- listDROMASamples("gCSI", tumor_type = "breast cancer")
 
 # List samples with mRNA data
-mrna_samples <- listDROMASamples("gCSI", data_sources = "mRNA")
+mrna_samples <- listDROMASamples("gCSI", feature_type = "mRNA")
 
 # List first 50 samples
 top_samples <- listDROMASamples("gCSI", limit = 50)

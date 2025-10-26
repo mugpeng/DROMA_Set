@@ -79,7 +79,7 @@ createMultiDromaSetFromDatabase <- function(project_names,
 
     tryCatch({
       ds <- createDromaSetFromDatabase(
-        project_name = project_names[i],
+        projects = project_names[i],
         db_path = db_path,
         db_group = db_groups[i],
         load_metadata = load_metadata,
@@ -208,7 +208,7 @@ createMultiDromaSetFromObjects <- function(..., project_names = NULL, merge_meta
 #' @description Adds a new DromaSet object to an existing MultiDromaSet
 #' @param multi_set A MultiDromaSet object
 #' @param droma_set A DromaSet object to add
-#' @param project_name Optional character, name for the new project (will use DromaSet name if not provided)
+#' @param projects Optional character, name for the new project (will use DromaSet name if not provided)
 #' @param update_metadata Logical, whether to update merged metadata (default: TRUE)
 #' @return Updated MultiDromaSet object
 #' @export
@@ -223,7 +223,7 @@ createMultiDromaSetFromObjects <- function(..., project_names = NULL, merge_meta
 #' # Add to MultiDromaSet
 #' multi_set <- addDromaSetToMulti(multi_set, new_set)
 #' }
-addDromaSetToMulti <- function(multi_set, droma_set, project_name = NULL, update_metadata = TRUE) {
+addDromaSetToMulti <- function(multi_set, droma_set, projects = NULL, update_metadata = TRUE) {
 
   if (!inherits(multi_set, "MultiDromaSet")) {
     stop("multi_set must be a MultiDromaSet object")
@@ -234,18 +234,18 @@ addDromaSetToMulti <- function(multi_set, droma_set, project_name = NULL, update
   }
 
   # Get project name
-  if (is.null(project_name)) {
-    project_name <- droma_set@name
+  if (is.null(projects)) {
+    projects <- droma_set@name
   }
 
   # Check if project already exists
-  if (project_name %in% multi_set@name) {
-    stop("Project '", project_name, "' already exists in MultiDromaSet. Use a different project_name or remove the existing project first.")
+  if (projects %in% multi_set@name) {
+    stop("Project '", projects, "' already exists in MultiDromaSet. Use a different projects or remove the existing project first.")
   }
 
   # Add the new DromaSet
-  multi_set@DromaSets[[project_name]] <- droma_set
-  multi_set@name <- c(multi_set@name, project_name)
+  multi_set@DromaSets[[projects]] <- droma_set
+  multi_set@name <- c(multi_set@name, projects)
 
   # Update metadata if requested
   if (update_metadata) {
@@ -258,7 +258,7 @@ addDromaSetToMulti <- function(multi_set, droma_set, project_name = NULL, update
     multi_set@datasetType <- new_dataset_types
   }
 
-  message("Added project '", project_name, "' to MultiDromaSet")
+  message("Added project '", projects, "' to MultiDromaSet")
 
   return(multi_set)
 }
@@ -267,7 +267,7 @@ addDromaSetToMulti <- function(multi_set, droma_set, project_name = NULL, update
 #'
 #' @description Removes a DromaSet object from an existing MultiDromaSet
 #' @param multi_set A MultiDromaSet object
-#' @param project_name Character, name of the project to remove
+#' @param projects Character, name of the project to remove
 #' @param update_metadata Logical, whether to update merged metadata (default: TRUE)
 #' @return Updated MultiDromaSet object
 #' @export
@@ -276,14 +276,14 @@ addDromaSetToMulti <- function(multi_set, droma_set, project_name = NULL, update
 #' # Remove a project from MultiDromaSet
 #' multi_set <- removeDromaSetFromMulti(multi_set, "CCLE")
 #' }
-removeDromaSetFromMulti <- function(multi_set, project_name, update_metadata = TRUE) {
+removeDromaSetFromMulti <- function(multi_set, projects, update_metadata = TRUE) {
 
   if (!inherits(multi_set, "MultiDromaSet")) {
     stop("multi_set must be a MultiDromaSet object")
   }
 
-  if (!project_name %in% multi_set@name) {
-    stop("Project '", project_name, "' not found in MultiDromaSet. Available projects: ",
+  if (!projects %in% multi_set@name) {
+    stop("Project '", projects, "' not found in MultiDromaSet. Available projects: ",
          paste(multi_set@name, collapse = ", "))
   }
 
@@ -292,8 +292,8 @@ removeDromaSetFromMulti <- function(multi_set, project_name, update_metadata = T
   }
 
   # Remove the DromaSet
-  multi_set@DromaSets[[project_name]] <- NULL
-  multi_set@name <- multi_set@name[multi_set@name != project_name]
+  multi_set@DromaSets[[projects]] <- NULL
+  multi_set@name <- multi_set@name[multi_set@name != projects]
 
   # Update metadata if requested
   if (update_metadata) {
@@ -306,7 +306,7 @@ removeDromaSetFromMulti <- function(multi_set, project_name, update_metadata = T
     multi_set@datasetType <- new_dataset_types
   }
 
-  message("Removed project '", project_name, "' from MultiDromaSet")
+  message("Removed project '", projects, "' from MultiDromaSet")
 
   return(multi_set)
 }

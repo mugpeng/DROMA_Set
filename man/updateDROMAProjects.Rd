@@ -5,14 +5,14 @@
 \title{Update DROMA Projects Metadata}
 \usage{
 updateDROMAProjects(
-  project_name = NULL,
+  projects = NULL,
   dataset_type = NULL,
   connection = NULL,
   create_table = TRUE
 )
 }
 \arguments{
-\item{project_name}{Character, the name of the project to update (e.g., "gCSI", "CCLE").
+\item{projects}{Character, the name of the project to update (e.g., "gCSI", "CCLE").
 If NULL, updates all projects found in the database.}
 
 \item{dataset_type}{Character, the dataset type to assign to the project(s) (e.g., "CellLine", "PDX", "PDO").

@@ -7,7 +7,7 @@
 \usage{
 loadTreatmentResponse(
   object,
-  drugs = NULL,
+  select_drugs = NULL,
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
@@ -17,7 +17,7 @@ loadTreatmentResponse(
 
 \S4method{loadTreatmentResponse}{DromaSet}(
   object,
-  drugs = NULL,
+  select_drugs = NULL,
   samples = NULL,
   return_data = FALSE,
   data_type = "all",
@@ -28,7 +28,7 @@ loadTreatmentResponse(
 \arguments{
 \item{object}{A DromaSet object}
 
-\item{drugs}{Optional vector of drug names to load. If NULL, loads all drugs.}
+\item{select_drugs}{Optional vector of drug names to load. If NULL, loads all drugs.}
 
 \item{samples}{Optional vector of sample IDs to load. If NULL, loads all samples.}
 

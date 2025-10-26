@@ -5,20 +5,20 @@
 \title{Retrieve Feature Data from DROMA Database}
 \usage{
 getFeatureFromDatabase(
-  select_feas_type,
-  select_feas = "all",
-  data_sources = "all",
+  feature_type,
+  select_features = "all",
+  projects = "all",
   data_type = "all",
   tumor_type = "all",
   connection = NULL
 )
 }
 \arguments{
-\item{select_feas_type}{The type of feature to select (e.g., "mRNA", "cnv", "drug")}
+\item{feature_type}{The type of feature to select (e.g., "mRNA", "cnv", "drug")}
 
-\item{select_feas}{The specific feature to select within the feature type (default: "all" to select entire table)}
+\item{select_features}{The specific feature to select within the feature type (default: "all" to select entire table)}
 
-\item{data_sources}{Vector of data sources to select from (e.g., c("ccle", "gdsc"))}
+\item{projects}{Vector of projects to select from (e.g., c("ccle", "gdsc"))}
 
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
 
@@ -27,7 +27,7 @@ getFeatureFromDatabase(
 \item{connection}{Optional database connection object. If NULL, uses global connection.}
 }
 \value{
-A list of selected features from specified data sources
+A list of selected features from specified projects
 }
 \description{
 Fetches specific feature data from the DROMA database based on selection criteria

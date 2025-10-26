@@ -1,9 +1,9 @@
 #' Create a DromaSet from Database
 #'
 #' @description Creates a DromaSet object linked to data in a SQLite database
-#' @param project_name The name of the project/dataset (e.g., "gCSI", "CCLE")
+#' @param projects The name of the project/dataset (e.g., "gCSI", "CCLE")
 #' @param db_path Path to the SQLite database
-#' @param db_group Optional group name in the database, if different from project_name
+#' @param db_group Optional group name in the database, if different from projects
 #' @param load_metadata Logical, whether to load sample and treatment metadata (default: TRUE)
 #' @param dataset_type Optional dataset type (e.g., "CellLine", "PDX", "PDO")
 #' @param auto_load Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)
@@ -17,16 +17,16 @@
 #' # Create a DromaSet and automatically load drug response data
 #' gCSI <- createDromaSetFromDatabase("gCSI", "~/droma.sqlite", auto_load = TRUE)
 #' }
-createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.expand("~"), "droma.sqlite"),
+createDromaSetFromDatabase <- function(projects, db_path = file.path(path.expand("~"), "droma.sqlite"),
                                     db_group = NULL, load_metadata = TRUE, dataset_type = NULL, auto_load = FALSE) {
 
   if (!file.exists(db_path)) {
     stop("Database file not found: ", db_path)
   }
 
-  # Set db_group to project_name if not specified
+  # Set db_group to projects if not specified
   if (is.null(db_group)) {
-    db_group <- project_name
+    db_group <- projects
   }
 
   # Connect to database
@@ -38,7 +38,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
   project_tables <- grep(paste0("^", db_group, "_"), all_tables, value = TRUE)
 
   if (length(project_tables) == 0) {
-    stop("No tables found for project '", project_name, "' with group prefix '", db_group, "'")
+    stop("No tables found for project '", projects, "' with group prefix '", db_group, "'")
   }
 
   # Load metadata if requested
@@ -85,7 +85,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
           sample_metadata <- DBI::dbGetQuery(con, sample_query)
           # Filter by project if ProjectID column exists
           if ("ProjectID" %in% colnames(sample_metadata)) {
-            sample_metadata <- sample_metadata[sample_metadata$ProjectID %in% project_name, ]
+            sample_metadata <- sample_metadata[sample_metadata$ProjectID %in% projects, ]
           }
           sample_metadata <- unique(sample_metadata)
         }, error = function(e) {
@@ -104,7 +104,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
 
       tryCatch({
         treatment_metadata <- DBI::dbGetQuery(con, drug_query)
-        treatment_metadata <- treatment_metadata[treatment_metadata$ProjectID %in% project_name,]
+        treatment_metadata <- treatment_metadata[treatment_metadata$ProjectID %in% projects,]
         treatment_metadata <- unique(treatment_metadata)
       }, error = function(e) {
         warning("Problem with loading treatment metadata: ", e$message)
@@ -119,7 +119,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
 
   # Create the DromaSet object
   object <- DromaSet(
-    name = project_name,
+    name = projects,
     sampleMetadata = sample_metadata,
     treatmentMetadata = treatment_metadata,
     datasetType = ifelse(is.null(dataset_type), NA_character_, dataset_type),
@@ -135,7 +135,7 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
     if (paste0(db_group, "_drug") %in% all_tables) {
       tryCatch({
         object <- loadTreatmentResponse(object)
-        message("Loaded treatment response data for project '", project_name, "'")
+        message("Loaded treatment response data for project '", projects, "'")
       }, error = function(e) {
         warning("Problem with loading treatment response data: ", e$message)
       })
@@ -151,8 +151,8 @@ createDromaSetFromDatabase <- function(project_name, db_path = file.path(path.ex
     if (length(profile_types) > 0) {
       for (profile_type in profile_types) {
         tryCatch({
-          object <- loadMolecularProfiles(object, molecular_type = profile_type)
-          message("Loaded '", profile_type, "' molecular profile data for project '", project_name, "'")
+          object <- loadMolecularProfiles(object, feature_type = profile_type)
+          message("Loaded '", profile_type, "' molecular profile data for project '", projects, "'")
         }, error = function(e) {
           warning("Problem with loading '", profile_type, "' molecular profile data: ", e$message)
         })

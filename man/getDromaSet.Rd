@@ -5,14 +5,14 @@
 \alias{getDromaSet,MultiDromaSet-method}
 \title{Get DromaSet by Project Name}
 \usage{
-getDromaSet(object, project_name)
+getDromaSet(object, projects)
 
-\S4method{getDromaSet}{MultiDromaSet}(object, project_name)
+\S4method{getDromaSet}{MultiDromaSet}(object, projects)
 }
 \arguments{
 \item{object}{A MultiDromaSet object}
 
-\item{project_name}{Character, the name of the project to retrieve}
+\item{projects}{Character, the name of the project to retrieve}
 }
 \value{
 A DromaSet object

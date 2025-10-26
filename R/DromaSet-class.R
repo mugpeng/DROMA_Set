@@ -234,8 +234,8 @@ setMethod("availableTreatmentResponses", "DromaSet", function(object, include_db
 #'
 #' @description Loads specific molecular profile data from the database into a DromaSet object
 #' @param object A DromaSet object
-#' @param molecular_type The type of molecular data to load (e.g., "mRNA", "cnv", "mutation_gene") or "all" to load all available types
-#' @param features Optional vector of feature names to load. If NULL, loads all features.
+#' @param feature_type The type of molecular data to load (e.g., "mRNA", "cnv", "mutation_gene") or "all" to load all available types
+#' @param select_features Optional vector of feature names to load. If NULL, loads all features.
 #' @param samples Optional vector of sample IDs to load. If NULL, loads all samples.
 #' @param return_data Logical, if TRUE returns the loaded data directly instead of updating the object (default: FALSE)
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
@@ -246,14 +246,14 @@ setMethod("availableTreatmentResponses", "DromaSet", function(object, include_db
 #' @param format Character, format of returned discrete data: "wide" (features as rows, samples as columns) or "long" (default, original database format with features and samples columns)
 #' @return Updated DromaSet object with loaded molecular data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadMolecularProfiles", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long")
+setGeneric("loadMolecularProfiles", function(object, feature_type, select_features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long")
   standardGeneric("loadMolecularProfiles"))
 
 #' @rdname loadMolecularProfiles
 #' @export
-setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long") {
-  # Handle "all" molecular_type option with parallel processing
-  if (molecular_type == "all") {
+setMethod("loadMolecularProfiles", "DromaSet", function(object, feature_type, select_features = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", chunk_size = 100000, validate_features = TRUE, zscore = FALSE, format = "long") {
+  # Handle "all" feature_type option with parallel processing
+  if (feature_type == "all") {
     # Get all available molecular profile types
     available_types <- availableMolecularProfiles(object, include_db = TRUE)
 
@@ -273,8 +273,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
         tryCatch({
           loadMolecularProfiles(
             object = object,
-            molecular_type = mol_type,
-            features = features,
+            feature_type = mol_type,
+            select_features = select_features,
             samples = samples,
             return_data = TRUE,
             data_type = data_type,
@@ -302,8 +302,8 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
         tryCatch({
           mol_data <- loadMolecularProfiles(
             object = object,
-            molecular_type = mol_type,
-            features = features,
+            feature_type = mol_type,
+            select_features = select_features,
             samples = samples,
             return_data = TRUE,
             data_type = data_type,
@@ -358,9 +358,9 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
   DBI::dbExecute(con, "PRAGMA cache_size = -10000")  # 10MB cache
 
   # Check table existence
-  table_name <- paste0(group_prefix, "_", molecular_type)
+  table_name <- paste0(group_prefix, "_", feature_type)
   if (!table_name %in% DBI::dbListTables(con)) {
-    stop("Molecular profile type '", molecular_type, "' not found for dataset '", object@name, "'")
+    stop("Molecular profile type '", feature_type, "' not found for dataset '", object@name, "'")
   }
 
   # Pre-filter samples based on data_type and tumor_type
@@ -373,29 +373,29 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
       if (data_type != "all") {
         filtered_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$DataType == data_type]
         if (length(filtered_samples) == 0) {
-          return(empty_result(molecular_type, return_data, object))
+          return(empty_result(feature_type, return_data, object))
         }
       }
 
       if (tumor_type != "all") {
         tumor_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$TumorType == tumor_type]
         if (length(tumor_samples) == 0) {
-          return(empty_result(molecular_type, return_data, object))
+          return(empty_result(feature_type, return_data, object))
         }
         filtered_samples <- intersect(filtered_samples, tumor_samples)
       }
 
       samples <- if (is.null(samples)) filtered_samples else intersect(samples, filtered_samples)
       if (length(samples) == 0) {
-        return(empty_result(molecular_type, return_data, object))
+        return(empty_result(feature_type, return_data, object))
       }
     }
   }
 
   # Load data based on molecular type
-  if (molecular_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms")) {
+  if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms")) {
     # For matrix data - use optimized query construction
-    result <- load_matrix_data(con, table_name, molecular_type, features, samples,
+    result <- load_matrix_data(con, table_name, feature_type, select_features, samples,
                               chunk_size, validate_features, return_data)
 
     # Apply z-score normalization if requested
@@ -405,71 +405,71 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, molecular_type, 
     }
 
     if (!return_data) {
-      object@molecularProfiles[[molecular_type]] <- result
+      object@molecularProfiles[[feature_type]] <- result
       return(object)
     } else {
       return(result)
     }
 
-  } else if (molecular_type %in% c("mutation_gene", "mutation_site", "fusion")) {
+  } else if (feature_type %in% c("mutation_gene", "mutation_site", "fusion")) {
     # For dataframe data
-    result <- load_dataframe_data(con, table_name, molecular_type, features, samples,
+    result <- load_dataframe_data(con, table_name, feature_type, select_features, samples,
                                  validate_features, return_data, format)
 
     # No z-score normalization for discrete data
     if (zscore) {
-      warning("Z-score normalization not applicable for molecular type: ", molecular_type)
+      warning("Z-score normalization not applicable for molecular type: ", feature_type)
     }
 
     if (!return_data) {
-      object@molecularProfiles[[molecular_type]] <- result
+      object@molecularProfiles[[feature_type]] <- result
       return(object)
     } else {
       return(result)
     }
   } else {
-    warning("Unrecognized molecular profile type: ", molecular_type)
+    warning("Unrecognized molecular profile type: ", feature_type)
     if (return_data) return(NULL)
   }
 })
 
 # Helper function for empty results
-empty_result <- function(molecular_type, return_data, object) {
+empty_result <- function(feature_type, return_data, object) {
   if (return_data) return(matrix(nrow = 0, ncol = 0))
-  object@molecularProfiles[[molecular_type]] <- matrix(nrow = 0, ncol = 0)
+  object@molecularProfiles[[feature_type]] <- matrix(nrow = 0, ncol = 0)
   return(object)
 }
 
 # Helper function to load matrix data with optimizations
-load_matrix_data <- function(con, table_name, molecular_type, features, samples,
+load_matrix_data <- function(con, table_name, feature_type, select_features, samples,
                             chunk_size, validate_features, return_data) {
   # Build optimized SQL query
   query_parts <- c("SELECT * FROM", table_name)
   where_clauses <- c()
 
   # Add feature filter
-  if (!is.null(features)) {
+  if (!is.null(select_features)) {
     if (validate_features) {
       # Single query to check and filter features
       feature_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name,
-                             " WHERE feature_id IN (", paste0("'", features, "'", collapse = ","), ")")
+                             " WHERE feature_id IN (", paste0("'", select_features, "'", collapse = ","), ")")
       existing_features <- DBI::dbGetQuery(con, feature_query)$feature_id
 
-      missing_features <- setdiff(features, existing_features)
+      missing_features <- setdiff(select_features, existing_features)
       if (length(missing_features) > 0) {
-        warning("The following features do not exist in the ", molecular_type, " data: ",
+        warning("The following features do not exist in the ", feature_type, " data: ",
                 paste(missing_features, collapse = ", "))
       }
 
       if (length(existing_features) == 0) {
-        warning("None of the specified features exist in the ", molecular_type, " data")
+        warning("None of the specified features exist in the ", feature_type, " data")
         return(matrix(nrow = 0, ncol = 0))
       }
 
-      features <- existing_features
+      select_features <- existing_features
     }
 
-    where_clauses <- c(where_clauses, paste0("feature_id IN (", paste0("'", features, "'", collapse = ","), ")"))
+    where_clauses <- c(where_clauses, paste0("feature_id IN (", paste0("'", select_features, "'", collapse = ","), ")"))
   }
 
   # Add sample filter if specified
@@ -506,13 +506,13 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
 
   if (total_rows > chunk_size && requireNamespace("data.table", quietly = TRUE)) {
     # Use chunked loading with data.table
-    return(load_data_chunks(con, query, table_name, features, samples, chunk_size))
+    return(load_data_chunks(con, query, table_name, select_features, samples, chunk_size))
   } else {
     # Standard loading
     data <- DBI::dbGetQuery(con, query)
 
     if (nrow(data) == 0) {
-      warning("No data found for molecular profile type: ", molecular_type)
+      warning("No data found for molecular profile type: ", feature_type)
       return(matrix(nrow = 0, ncol = 0))
     }
 
@@ -537,7 +537,7 @@ load_matrix_data <- function(con, table_name, molecular_type, features, samples,
 }
 
 # Helper function to load dataframe data
-load_dataframe_data <- function(con, table_name, molecular_type, features, samples, validate_features, return_data, format = "long") {
+load_dataframe_data <- function(con, table_name, feature_type, select_features, samples, validate_features, return_data, format = "long") {
   # Check table structure
   col_info <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", table_name, ")"))
   col_names <- col_info$name
@@ -553,13 +553,13 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
   where_clauses <- c()
 
   # Add feature filter
-  if (!is.null(features)) {
+  if (!is.null(select_features)) {
     if (validate_features) {
       feature_query <- paste0("SELECT DISTINCT features FROM ", table_name,
-                          " WHERE features IN (", paste0("'", features, "'", collapse = ","), ")")
+                          " WHERE features IN (", paste0("'", select_features, "'", collapse = ","), ")")
       existing_features <- DBI::dbGetQuery(con, feature_query)$features
 
-      missing_features <- setdiff(features, existing_features)
+      missing_features <- setdiff(select_features, existing_features)
       if (length(missing_features) > 0) {
         warning("The following features do not exist: ", paste(missing_features, collapse = ", "))
       }
@@ -569,10 +569,10 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
         return(data.frame())
       }
 
-      features <- existing_features
+      select_features <- existing_features
     }
 
-    where_clauses <- c(where_clauses, paste0("features IN (", paste0("'", features, "'", collapse = ","), ")"))
+    where_clauses <- c(where_clauses, paste0("features IN (", paste0("'", select_features, "'", collapse = ","), ")"))
   }
 
   # Add sample filter
@@ -607,7 +607,7 @@ load_dataframe_data <- function(con, table_name, molecular_type, features, sampl
   data <- DBI::dbGetQuery(con, query)
 
   if (nrow(data) == 0) {
-    warning("No data found for molecular profile type: ", molecular_type)
+    warning("No data found for molecular profile type: ", feature_type)
     return(data.frame())
   }
 
@@ -718,7 +718,7 @@ load_data_chunks <- function(con, base_query, table_name, features, samples, chu
 #'
 #' @description Loads drug response data from the database into a DromaSet object
 #' @param object A DromaSet object
-#' @param drugs Optional vector of drug names to load. If NULL, loads all drugs.
+#' @param select_drugs Optional vector of drug names to load. If NULL, loads all drugs.
 #' @param samples Optional vector of sample IDs to load. If NULL, loads all samples.
 #' @param return_data Logical, if TRUE returns the loaded data directly instead of updating the object (default: FALSE)
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO" (patient-derived organoids), "PDC", or "PDX"
@@ -726,12 +726,12 @@ load_data_chunks <- function(con, base_query, table_name, features, samples, chu
 #' @param zscore Logical, whether to apply z-score normalization (default: FALSE)
 #' @return Updated DromaSet object with loaded drug response data or the loaded data directly if return_data=TRUE
 #' @export
-setGeneric("loadTreatmentResponse", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
+setGeneric("loadTreatmentResponse", function(object, select_drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE)
   standardGeneric("loadTreatmentResponse"))
 
 #' @rdname loadTreatmentResponse
 #' @export
-setMethod("loadTreatmentResponse", "DromaSet", function(object, drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
+setMethod("loadTreatmentResponse", "DromaSet", function(object, select_drugs = NULL, samples = NULL, return_data = FALSE, data_type = "all", tumor_type = "all", zscore = FALSE) {
   # Verify we have database connection info
   if (length(object@db_info) == 0 || is.null(object@db_info$db_path)) {
     stop("No database connection information available")
@@ -812,19 +812,19 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, drugs = NULL, sa
   query <- paste0("SELECT * FROM ", table_name)
 
   # Add drug filter if specified
-  if (!is.null(drugs)) {
+  if (!is.null(select_drugs)) {
     # First check if all drugs exist in the database
     drug_check_query <- paste0("SELECT DISTINCT feature_id FROM ", table_name)
     all_drugs <- DBI::dbGetQuery(con, drug_check_query)$feature_id
 
-    missing_drugs <- setdiff(drugs, all_drugs)
+    missing_drugs <- setdiff(select_drugs, all_drugs)
     if (length(missing_drugs) > 0) {
       warning("The following drugs do not exist in the treatment response data: ",
               paste(missing_drugs, collapse = ", "))
     }
 
     # Only query for drugs that exist
-    existing_drugs <- intersect(drugs, all_drugs)
+    existing_drugs <- intersect(select_drugs, all_drugs)
     if (length(existing_drugs) == 0) {
       warning("None of the specified drugs exist in the treatment response data")
       if (return_data) {

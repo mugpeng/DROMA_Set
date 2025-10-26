@@ -7,7 +7,7 @@
 \usage{
 loadMultiProjectTreatmentResponse(
   object,
-  drugs = NULL,
+  select_drugs = NULL,
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
@@ -17,7 +17,7 @@ loadMultiProjectTreatmentResponse(
 
 \S4method{loadMultiProjectTreatmentResponse}{MultiDromaSet}(
   object,
-  drugs = NULL,
+  select_drugs = NULL,
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
@@ -28,7 +28,7 @@ loadMultiProjectTreatmentResponse(
 \arguments{
 \item{object}{A MultiDromaSet object}
 
-\item{drugs}{Character vector, specific drugs to load (optional)}
+\item{select_drugs}{Character vector, specific drugs to load (optional)}
 
 \item{projects}{Character vector, specific projects to load from (default: all projects)}
 

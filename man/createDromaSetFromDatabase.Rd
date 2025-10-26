@@ -5,7 +5,7 @@
 \title{Create a DromaSet from Database}
 \usage{
 createDromaSetFromDatabase(
-  project_name,
+  projects,
   db_path = file.path(path.expand("~"), "droma.sqlite"),
   db_group = NULL,
   load_metadata = TRUE,
@@ -14,11 +14,11 @@ createDromaSetFromDatabase(
 )
 }
 \arguments{
-\item{project_name}{The name of the project/dataset (e.g., "gCSI", "CCLE")}
+\item{projects}{The name of the project/dataset (e.g., "gCSI", "CCLE")}
 
 \item{db_path}{Path to the SQLite database}
 
-\item{db_group}{Optional group name in the database, if different from project_name}
+\item{db_group}{Optional group name in the database, if different from projects}
 
 \item{load_metadata}{Logical, whether to load sample and treatment metadata (default: TRUE)}
 

@@ -7,8 +7,8 @@
 \usage{
 loadMultiProjectMolecularProfiles(
   object,
-  molecular_type,
-  features = NULL,
+  feature_type,
+  select_features = NULL,
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
@@ -19,8 +19,8 @@ loadMultiProjectMolecularProfiles(
 
 \S4method{loadMultiProjectMolecularProfiles}{MultiDromaSet}(
   object,
-  molecular_type,
-  features = NULL,
+  feature_type,
+  select_features = NULL,
   projects = NULL,
   overlap_only = FALSE,
   data_type = "all",
@@ -32,9 +32,9 @@ loadMultiProjectMolecularProfiles(
 \arguments{
 \item{object}{A MultiDromaSet object}
 
-\item{molecular_type}{Character, the type to load (e.g., "mRNA", "cnv") or "all" to load all available types}
+\item{feature_type}{Character, the type to load (e.g., "mRNA", "cnv") or "all" to load all available types}
 
-\item{features}{Character vector, specific features to load (optional)}
+\item{select_features}{Character vector, specific features to load (optional)}
 
 \item{projects}{Character vector, specific projects to load from (default: all projects)}
 

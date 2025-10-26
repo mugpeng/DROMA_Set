@@ -30,7 +30,7 @@ print(mrna_tables)
 # Retrieve BRCA1 mRNA expression from CCLE and GDSC datasets only
 brca1_mRNA <- getFeatureFromDatabase(
   select_feas_type = "mRNA",
-  select_feas = c("BRCA1"),
+  select_features = c("BRCA1"),
   data_sources = c("CCLE","gCSI")
 )
 
@@ -43,7 +43,7 @@ sapply(brca1_mRNA, length)
 # Get a drug's response data only from PDX models
 drug_pdx <- getFeatureFromDatabase(
   select_feas_type = "drug",
-  select_feas = "Tamoxifen",
+  select_features = "Tamoxifen",
   data_type = "PDX"
 )
 
@@ -52,7 +52,7 @@ drug_pdx <- getFeatureFromDatabase(
 # Get mutation data for TP53 in breast cancer cell lines
 tp53_mut_breast <- getFeatureFromDatabase(
   select_feas_type = "mutation_gene",
-  select_feas = "TP53",
+  select_features = "TP53",
   data_type = "CellLine",
   tumor_type = "breast cancer"
 )
