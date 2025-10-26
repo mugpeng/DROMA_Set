@@ -9,7 +9,8 @@ createMultiDromaSetFromAllProjects(
   exclude_projects = NULL,
   include_projects = NULL,
   load_metadata = TRUE,
-  auto_load = FALSE
+  auto_load = FALSE,
+  con = NULL
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ createMultiDromaSetFromAllProjects(
 \item{load_metadata}{Logical, whether to load sample and treatment metadata (default: TRUE)}
 
 \item{auto_load}{Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)}
+
+\item{con}{Optional database connection object. If provided, this connection will be used instead of creating a new one}
 }
 \value{
 A MultiDromaSet object containing all available projects

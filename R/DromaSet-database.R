@@ -7,6 +7,7 @@
 #' @param load_metadata Logical, whether to load sample and treatment metadata (default: TRUE)
 #' @param dataset_type Optional dataset type (e.g., "CellLine", "PDX", "PDO")
 #' @param auto_load Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)
+#' @param con Optional database connection object. If provided, this connection will be used instead of creating a new one
 #' @return A DromaSet object linked to the database
 #' @export
 #' @examples
@@ -18,7 +19,7 @@
 #' gCSI <- createDromaSetFromDatabase("gCSI", "~/droma.sqlite", auto_load = TRUE)
 #' }
 createDromaSetFromDatabase <- function(projects, db_path = file.path(path.expand("~"), "droma.sqlite"),
-                                    db_group = NULL, load_metadata = TRUE, dataset_type = NULL, auto_load = FALSE) {
+                                    db_group = NULL, load_metadata = TRUE, dataset_type = NULL, auto_load = FALSE, con = NULL) {
 
   if (!file.exists(db_path)) {
     stop("Database file not found: ", db_path)
@@ -30,8 +31,16 @@ createDromaSetFromDatabase <- function(projects, db_path = file.path(path.expand
   }
 
   # Connect to database
-  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
-  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  # If connection is provided, use it; otherwise create a new one
+  close_on_exit <- FALSE
+  if (is.null(con)) {
+    con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+    close_on_exit <- TRUE
+  }
+  
+  if (close_on_exit) {
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+  }
 
   # Check if tables exist for this project
   all_tables <- DBI::dbListTables(con)

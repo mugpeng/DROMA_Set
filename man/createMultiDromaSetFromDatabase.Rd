@@ -10,7 +10,8 @@ createMultiDromaSetFromDatabase(
   db_groups = NULL,
   load_metadata = TRUE,
   dataset_types = NULL,
-  auto_load = FALSE
+  auto_load = FALSE,
+  con = NULL
 )
 }
 \arguments{
@@ -25,6 +26,8 @@ createMultiDromaSetFromDatabase(
 \item{dataset_types}{Optional character vector of dataset types for each project (e.g., c("CellLine", "PDX"))}
 
 \item{auto_load}{Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)}
+
+\item{con}{Optional database connection object. If provided, this connection will be used instead of creating a new one}
 }
 \value{
 A MultiDromaSet object linked to the database

@@ -7,6 +7,7 @@
 #' @param load_metadata Logical, whether to load sample and treatment metadata (default: TRUE)
 #' @param dataset_types Optional character vector of dataset types for each project (e.g., c("CellLine", "PDX"))
 #' @param auto_load Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)
+#' @param con Optional database connection object. If provided, this connection will be used instead of creating a new one
 #' @return A MultiDromaSet object linked to the database
 #' @export
 #' @examples
@@ -29,7 +30,8 @@ createMultiDromaSetFromDatabase <- function(project_names,
                                           db_groups = NULL,
                                           load_metadata = TRUE,
                                           dataset_types = NULL,
-                                          auto_load = FALSE) {
+                                          auto_load = FALSE,
+                                          con = NULL) {
 
   if (!file.exists(db_path)) {
     stop("Database file not found: ", db_path)
@@ -58,8 +60,16 @@ createMultiDromaSetFromDatabase <- function(project_names,
   }
 
   # Connect to database to validate projects exist
-  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
-  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  # If connection is provided, use it; otherwise create a new one
+  close_on_exit <- FALSE
+  if (is.null(con)) {
+    con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+    close_on_exit <- TRUE
+  }
+  
+  if (close_on_exit) {
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+  }
 
   all_tables <- DBI::dbListTables(con)
 
@@ -84,7 +94,8 @@ createMultiDromaSetFromDatabase <- function(project_names,
         db_group = db_groups[i],
         load_metadata = load_metadata,
         dataset_type = dataset_types[i],
-        auto_load = auto_load
+        auto_load = auto_load,
+        con = con
       )
       droma_sets[[project_names[i]]] <- ds
     }, error = function(e) {
@@ -319,6 +330,7 @@ removeDromaSetFromMulti <- function(multi_set, projects, update_metadata = TRUE)
 #' @param include_projects Character vector of project names to include (if specified, only these will be included)
 #' @param load_metadata Logical, whether to load sample and treatment metadata (default: TRUE)
 #' @param auto_load Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)
+#' @param con Optional database connection object. If provided, this connection will be used instead of creating a new one
 #' @return A MultiDromaSet object containing all available projects
 #' @export
 #' @examples
@@ -338,15 +350,24 @@ createMultiDromaSetFromAllProjects <- function(db_path = file.path(path.expand("
                                              exclude_projects = NULL,
                                              include_projects = NULL,
                                              load_metadata = TRUE,
-                                             auto_load = FALSE) {
+                                             auto_load = FALSE,
+                                             con = NULL) {
 
   if (!file.exists(db_path)) {
     stop("Database file not found: ", db_path)
   }
 
   # Get all available projects
-  con <- connectDROMADatabase(db_path)
-  on.exit(closeDROMADatabase(con), add = TRUE)
+  # If connection is provided, use it; otherwise create a new one
+  close_on_exit <- FALSE
+  if (is.null(con)) {
+    con <- connectDROMADatabase(db_path)
+    close_on_exit <- TRUE
+  }
+
+  if (close_on_exit) {
+    on.exit(closeDROMADatabase(con), add = TRUE)
+  }
 
   all_projects <- listDROMAProjects(con, show_names_only = TRUE)
 
@@ -378,12 +399,13 @@ createMultiDromaSetFromAllProjects <- function(db_path = file.path(path.expand("
 
   message("Creating MultiDromaSet with projects: ", paste(selected_projects, collapse = ", "))
 
-  # Create MultiDromaSet
+  # Create MultiDromaSet, reusing the existing database connection
   multi_set <- createMultiDromaSetFromDatabase(
     project_names = selected_projects,
     db_path = db_path,
     load_metadata = load_metadata,
-    auto_load = auto_load
+    auto_load = auto_load,
+    con = con
   )
 
   return(multi_set)

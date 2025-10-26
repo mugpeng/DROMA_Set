@@ -10,7 +10,8 @@ createDromaSetFromDatabase(
   db_group = NULL,
   load_metadata = TRUE,
   dataset_type = NULL,
-  auto_load = FALSE
+  auto_load = FALSE,
+  con = NULL
 )
 }
 \arguments{
@@ -25,6 +26,8 @@ createDromaSetFromDatabase(
 \item{dataset_type}{Optional dataset type (e.g., "CellLine", "PDX", "PDO")}
 
 \item{auto_load}{Logical, whether to automatically load treatment response and molecular profiles (default: FALSE)}
+
+\item{con}{Optional database connection object. If provided, this connection will be used instead of creating a new one}
 }
 \value{
 A DromaSet object linked to the database
