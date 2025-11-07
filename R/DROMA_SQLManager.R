@@ -127,7 +127,7 @@ updateDROMADatabase <- function(obj, table_name, overwrite = FALSE, connection =
 #' @description Fetches specific feature data from the DROMA database based on selection criteria
 #' @param feature_type The type of feature to select (e.g., "mRNA", "cnv", "drug")
 #' @param select_features The specific feature to select within the feature type (default: "all" to select entire table)
-#' @param projects Vector of projects to select from (e.g., c("ccle", "gdsc"))
+#' @param projects Vector of projects to select from (e.g., c("CCLE", "GDSC"))
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or specific tumor type
 #' @param connection Optional database connection object. If NULL, uses global connection.
@@ -261,11 +261,21 @@ getFeatureFromDatabase <- function(feature_type, select_features = "all",
     # Filter by samples if needed
     if (!is.null(filtered_samples)) {
       if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
-        common_samples <- intersect(names(feature_vector), filtered_samples)
-        if (length(common_samples) == 0) {
-          next  # Skip if no samples match the filter
+        if (select_features == "all") {
+          # For matrices (all features)
+          common_samples <- intersect(colnames(feature_vector), filtered_samples)
+          if (length(common_samples) == 0) {
+            next  # Skip if no samples match the filter
+          }
+          feature_vector <- feature_vector[, common_samples, drop = FALSE]
+        } else {
+          # For vectors (single feature)
+          common_samples <- intersect(names(feature_vector), filtered_samples)
+          if (length(common_samples) == 0) {
+            next  # Skip if no samples match the filter
+          }
+          feature_vector <- feature_vector[common_samples]
         }
-        feature_vector <- feature_vector[common_samples]
       } else {
         feature_vector <- intersect(feature_vector, filtered_samples)
         if (length(feature_vector) == 0) {
