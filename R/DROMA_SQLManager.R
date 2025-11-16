@@ -1218,8 +1218,9 @@ listDROMASamples <- function(projects, feature_type = "all", data_type = "all", 
 
 #' Get Annotation Data from DROMA Database
 #'
-#' @description Retrieves annotation data from either sample_anno or drug_anno tables
-#' @param anno_type Character, type of annotation to retrieve: "sample" or "drug"
+#' @description Retrieves annotation data from sample_anno, drug_anno, or drug_structure tables
+#' @param anno_type Character, type of annotation to retrieve: "sample", "drug", or "structure".
+#'   When set to "structure", the entire drug_structure table is returned without applying any filters.
 #' @param projects Character, optional project name to filter results (default: NULL for all projects)
 #' @param ids Character vector, optional specific IDs to retrieve (SampleID for samples, DrugName for drugs)
 #' @param data_type Character, for sample annotations only: filter by data type ("all", "CellLine", "PDO", "PDC", "PDX")
@@ -1265,8 +1266,9 @@ getDROMAAnnotation <- function(anno_type, projects = NULL, ids = NULL,
   }
 
   # Validate anno_type
-  if (!anno_type %in% c("sample", "drug")) {
-    stop("anno_type must be either 'sample' or 'drug'")
+  valid_types <- c("sample", "drug", "structure")
+  if (!anno_type %in% valid_types) {
+    stop("anno_type must be one of: ", paste(valid_types, collapse = ", "))
   }
 
   # Get connection from global environment if not provided
@@ -1275,6 +1277,33 @@ getDROMAAnnotation <- function(anno_type, projects = NULL, ids = NULL,
       stop("No database connection found. Connect first with connectDROMADatabase()")
     }
     connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  all_tables <- DBI::dbListTables(connection)
+
+  # Structure annotations are returned as-is without filters
+  if (identical(anno_type, "structure")) {
+    table_name <- "drug_structure"
+
+    if (!table_name %in% all_tables) {
+      stop("Structure table 'drug_structure' not found. Please update to the latest DROMA database from https://zenodo.org/records/17498421")
+    }
+
+    ignored_params <- c(
+      if (!is.null(projects)) "projects",
+      if (!is.null(ids)) "ids",
+      if (!identical(data_type, "all")) "data_type",
+      if (!identical(tumor_type, "all")) "tumor_type",
+      if (!is.null(limit)) "limit"
+    )
+    if (length(ignored_params) > 0) {
+      message("Parameters ", paste(ignored_params, collapse = ", "),
+              " are ignored when anno_type = 'structure'. Returning full 'drug_structure' table.")
+    }
+
+    result <- DBI::dbReadTable(connection, table_name)
+    message("Retrieved ", nrow(result), " structure records from ", table_name)
+    return(result)
   }
 
   # Determine table name and ID column
@@ -1289,7 +1318,6 @@ getDROMAAnnotation <- function(anno_type, projects = NULL, ids = NULL,
   }
 
   # Check if table exists
-  all_tables <- DBI::dbListTables(connection)
   if (!table_name %in% all_tables) {
     stop("Annotation table '", table_name, "' not found in database")
   }

@@ -18,7 +18,7 @@ getFeatureFromDatabase(
 
 \item{select_features}{The specific feature to select within the feature type (default: "all" to select entire table)}
 
-\item{projects}{Vector of projects to select from (e.g., c("ccle", "gdsc"))}
+\item{projects}{Vector of projects to select from (e.g., c("CCLE", "GDSC"))}
 
 \item{data_type}{Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
 

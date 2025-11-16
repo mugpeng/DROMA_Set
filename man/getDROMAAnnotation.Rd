@@ -15,7 +15,8 @@ getDROMAAnnotation(
 )
 }
 \arguments{
-\item{anno_type}{Character, type of annotation to retrieve: "sample" or "drug"}
+\item{anno_type}{Character, type of annotation to retrieve: "sample", "drug", or "structure".
+When set to "structure", the entire drug_structure table is returned without applying any filters.}
 
 \item{projects}{Character, optional project name to filter results (default: NULL for all projects)}
 
@@ -33,7 +34,7 @@ getDROMAAnnotation(
 A data frame containing the annotation data
 }
 \description{
-Retrieves annotation data from either sample_anno or drug_anno tables
+Retrieves annotation data from sample_anno, drug_anno, or drug_structure tables
 }
 \examples{
 \dontrun{
