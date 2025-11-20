@@ -35,4 +35,4 @@ Collate:
     'DromaSet-database.R'
     'MultiDromaSet-database.R'
     'DROMA_SQLManager.R'
-    'FuncMatrixDatabase.R' 
+    'CTRDB_SQLManager.R' 

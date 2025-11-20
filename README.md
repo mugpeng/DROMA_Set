@@ -217,7 +217,7 @@ multi_all <- createMultiDromaSetFromAllProjects("droma.sqlite",
                                                exclude_projects = "test_data")
 ```
 
-### 2. Matrix Database Storage (FuncMatrixDatabase.R)
+### 2. CTRDB SQL Manager (CTRDB_SQLManager.R)
 
 ```r
 # Store matrix data directly in database
@@ -380,10 +380,13 @@ The DROMA database uses a standardized table naming convention:
 - `checkDROMASampleNames()`: Check and harmonize sample names
 - `checkDROMADrugNames()`: Check and harmonize drug names
 
-### Matrix Storage (FuncMatrixDatabase.R)
+### CTRDB SQL Manager (CTRDB_SQLManager.R)
 - `storeMatricesInDatabase()`: Store matrix data in SQLite database
 - `retrieveMatrixFromDatabase()`: Retrieve matrix data from database
 - `listMatrixTables()`: List matrix tables with metadata
+- `getPatientExpressionData()`: Retrieve patient expression data from CTRDB
+- `connectCTRDatabase()`: Connect to CTRDB database
+- `closeCTRDatabase()`: Close CTRDB database connection
 
 ## Examples
 
