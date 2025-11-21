@@ -36,4 +36,3 @@ con <- connectCTRDatabase("path/to/ctrdb.sqlite")
 expr_data <- getPatientExpressionData("Patient-001", con)
 }
 }
-
