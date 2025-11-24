@@ -428,12 +428,34 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
 #' List Available Projects in DROMA Database
 #'
 #' @description Lists all projects available in the DROMA database
-#' @param connection Optional database connection object. If NULL, uses global connection
 #' @param show_names_only Logical, if TRUE returns only a character vector of project names
-#' @param project_data_types Character, project name to get specific data types for
-#' @return A data frame with project information or a character vector of project names or data types
+#' @param projects Character, project name to get specific data types for (default: NULL for all projects)
+#' @param feature_type Character, filter projects by feature type availability (e.g., "mRNA", "cnv", "drug"). When specified, returns only projects that have this feature type available (default: NULL)
+#' @param connection Optional database connection object. If NULL, uses global connection
+#' @return A data frame with project information, a character vector of project names, or a character vector of data types
 #' @export
-listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, project_data_types = NULL) {
+#' @examples
+#' \dontrun{
+#' # Connect to database
+#' con <- connectDROMADatabase("path/to/droma.sqlite")
+#'
+#' # List all projects
+#' all_projects <- listDROMAProjects()
+#'
+#' # Get only project names
+#' project_names <- listDROMAProjects(show_names_only = TRUE)
+#'
+#' # Get data types for a specific project
+#' gCSI_data_types <- listDROMAProjects(projects = "gCSI")
+#'
+#' # Get projects that have mRNA data
+#' projects_with_mRNA <- listDROMAProjects(feature_type = "mRNA", show_names_only = TRUE)
+#'
+#' # Check if a specific project has a specific feature type
+#' has_drug_data <- listDROMAProjects(projects = "gCSI", feature_type = "drug")
+#' }
+listDROMAProjects <- function(show_names_only = FALSE, projects = NULL, 
+                              feature_type = NULL, connection = NULL) {
   if (is.null(connection)) {
     if (!exists("droma_db_connection", envir = .GlobalEnv)) {
       stop("No database connection found. Connect first with connectDROMADatabase()")
@@ -441,38 +463,80 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
     connection <- get("droma_db_connection", envir = .GlobalEnv)
   }
 
+  # Get all tables in database
+  all_tables <- DBI::dbListTables(connection)
+
   # Check if projects table exists
-  if ("projects" %in% DBI::dbListTables(connection)) {
+  if ("projects" %in% all_tables) {
     projects_df <- DBI::dbReadTable(connection, "projects")
+    
+    # If user wants data types for a specific project
+    if (!is.null(projects)) {
+      if (projects %in% projects_df$project_name) {
+        project_row <- projects_df[projects_df$project_name == projects, ]
+        # Split the data_types string by comma
+        available_types <- unlist(strsplit(project_row$data_types, ","))
+        
+        # If feature_type is specified, check if it exists for this project
+        if (!is.null(feature_type)) {
+          if (feature_type %in% available_types) {
+            message("Project '", projects, "' has feature type '", feature_type, "'")
+            return(TRUE)
+          } else {
+            message("Project '", projects, "' does not have feature type '", feature_type, "'")
+            message("Available types: ", paste(available_types, collapse = ", "))
+            return(FALSE)
+          }
+        }
+        
+        # Return data types for the project
+        return(available_types)
+      } else {
+        warning("Project '", projects, "' not found")
+        return(character(0))
+      }
+    }
+    
+    # If feature_type is specified, filter projects
+    if (!is.null(feature_type)) {
+      # Find projects that have this feature type
+      projects_with_feature <- projects_df$project_name[
+        sapply(projects_df$data_types, function(types) {
+          feature_type %in% unlist(strsplit(types, ","))
+        })
+      ]
+      
+      if (length(projects_with_feature) == 0) {
+        message("No projects found with feature type '", feature_type, "'")
+        return(character(0))
+      }
+      
+      message("Found ", length(projects_with_feature), " project(s) with feature type '", feature_type, "'")
+      
+      if (show_names_only) {
+        return(projects_with_feature)
+      }
+      
+      # Return filtered data frame
+      return(projects_df[projects_df$project_name %in% projects_with_feature, ])
+    }
 
     # If user just wants project names, return them
     if (show_names_only) {
       return(projects_df$project_name)
     }
 
-    # If user wants data types for a specific project
-    if (!is.null(project_data_types)) {
-      if (project_data_types %in% projects_df$project_name) {
-        project_row <- projects_df[projects_df$project_name == project_data_types, ]
-        # Split the data_types string by comma and return as a vector
-        return(unlist(strsplit(project_row$data_types, ",")))
-      } else {
-        warning("Project '", project_data_types, "' not found")
-        return(character(0))
-      }
-    }
-
     return(projects_df)
   }
 
   # Otherwise, try to infer projects from table names
-  tables <- DBI::dbListTables(connection)
+  tables <- all_tables
 
   # Extract project names from table prefixes, excluding backup tables
   project_names <- unique(sapply(tables, function(t) {
     parts <- strsplit(t, "_")[[1]]
     if (length(parts) >= 2 &&
-        !t %in% c("sample_anno", "drug_anno") &&
+        !t %in% c("sample_anno", "drug_anno", "projects", "droma_metadata", "search_vectors") &&
         !grepl("_raw$", t)) {
       return(parts[1])
     } else {
@@ -489,27 +553,70 @@ listDROMAProjects <- function(connection = NULL, show_names_only = FALSE, projec
     return(data.frame())
   }
 
-  # Return just project names if requested
-  if (show_names_only) {
-    return(project_names)
-  }
-
   # If user wants data types for a specific project
-  if (!is.null(project_data_types)) {
-    if (project_data_types %in% project_names) {
+  if (!is.null(projects)) {
+    if (projects %in% project_names) {
       # Get all tables for this project, excluding backup tables
-      project_tables <- grep(paste0("^", project_data_types, "_"), tables, value = TRUE)
+      project_tables <- grep(paste0("^", projects, "_"), tables, value = TRUE)
       # Remove backup tables like "_raw"
       project_tables <- project_tables[!grepl("_raw$", project_tables)]
       # Extract data types from table names
       data_types <- unique(sapply(project_tables, function(t) {
-        sub(paste0("^", project_data_types, "_"), "", t)
+        sub(paste0("^", projects, "_"), "", t)
       }))
+      
+      # If feature_type is specified, check if it exists
+      if (!is.null(feature_type)) {
+        if (feature_type %in% data_types) {
+          message("Project '", projects, "' has feature type '", feature_type, "'")
+          return(TRUE)
+        } else {
+          message("Project '", projects, "' does not have feature type '", feature_type, "'")
+          message("Available types: ", paste(data_types, collapse = ", "))
+          return(FALSE)
+        }
+      }
+      
       return(data_types)
     } else {
-      warning("Project '", project_data_types, "' not found")
+      warning("Project '", projects, "' not found")
       return(character(0))
     }
+  }
+  
+  # If feature_type is specified, filter projects by checking tables
+  if (!is.null(feature_type)) {
+    projects_with_feature <- character(0)
+    
+    for (proj in project_names) {
+      table_name <- paste0(proj, "_", feature_type)
+      if (table_name %in% tables) {
+        projects_with_feature <- c(projects_with_feature, proj)
+      }
+    }
+    
+    if (length(projects_with_feature) == 0) {
+      message("No projects found with feature type '", feature_type, "'")
+      return(character(0))
+    }
+    
+    message("Found ", length(projects_with_feature), " project(s) with feature type '", feature_type, "'")
+    
+    if (show_names_only) {
+      return(projects_with_feature)
+    }
+    
+    # Return data frame with filtered projects
+    result <- data.frame(
+      projects = projects_with_feature,
+      stringsAsFactors = FALSE
+    )
+    return(result)
+  }
+
+  # Return just project names if requested
+  if (show_names_only) {
+    return(project_names)
   }
 
   # Create a data frame with project information

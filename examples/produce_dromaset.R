@@ -74,7 +74,7 @@ cat("\nAvailable treatment response data for gCSI:\n")
 print(responses)
 
 # Get data types for gCSI project
-gCSI_data_types <- listDROMAProjects(project_data_types = "gCSI")
+gCSI_data_types <- listDROMAProjects(projects = "gCSI")
 
 # get anno data
 # check samples from anno data

@@ -5,21 +5,45 @@
 \title{List Available Projects in DROMA Database}
 \usage{
 listDROMAProjects(
-  connection = NULL,
   show_names_only = FALSE,
-  project_data_types = NULL
+  projects = NULL,
+  feature_type = NULL,
+  connection = NULL
 )
 }
 \arguments{
-\item{connection}{Optional database connection object. If NULL, uses global connection}
-
 \item{show_names_only}{Logical, if TRUE returns only a character vector of project names}
 
-\item{project_data_types}{Character, project name to get specific data types for}
+\item{projects}{Character, project name to get specific data types for (default: NULL for all projects)}
+
+\item{feature_type}{Character, filter projects by feature type availability (e.g., "mRNA", "cnv", "drug"). When specified, returns only projects that have this feature type available (default: NULL)}
+
+\item{connection}{Optional database connection object. If NULL, uses global connection}
 }
 \value{
-A data frame with project information or a character vector of project names or data types
+A data frame with project information, a character vector of project names, or a character vector of data types
 }
 \description{
 Lists all projects available in the DROMA database
+}
+\examples{
+\dontrun{
+# Connect to database
+con <- connectDROMADatabase("path/to/droma.sqlite")
+
+# List all projects
+all_projects <- listDROMAProjects()
+
+# Get only project names
+project_names <- listDROMAProjects(show_names_only = TRUE)
+
+# Get data types for a specific project
+gCSI_data_types <- listDROMAProjects(projects = "gCSI")
+
+# Get projects that have mRNA data
+projects_with_mRNA <- listDROMAProjects(feature_type = "mRNA", show_names_only = TRUE)
+
+# Check if a specific project has a specific feature type
+has_drug_data <- listDROMAProjects(projects = "gCSI", feature_type = "drug")
+}
 }
