@@ -369,7 +369,7 @@ createMultiDromaSetFromAllProjects <- function(db_path = file.path(path.expand("
     on.exit(closeDROMADatabase(con), add = TRUE)
   }
 
-  all_projects <- listDROMAProjects(con, show_names_only = TRUE)
+  all_projects <- listDROMAProjects(show_names_only = TRUE, connection = con)
 
   if (length(all_projects) == 0) {
     stop("No projects found in database")
