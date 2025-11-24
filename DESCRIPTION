@@ -1,7 +1,7 @@
 Package: DROMA.Set
 Title: Drug Response and Omics Multi-project Analysis Set
-Version: 0.5.1
-Date: 2025-10-27
+Version: 0.5.2
+Date: 2025-11-24
 Authors@R: 
     person("Peng Yu", "Zhong", email = "yc47680@um.edu.mo", role = c("aut", "cre"))
 Description: DROMA_Set provides a comprehensive framework for managing and analyzing 

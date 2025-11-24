@@ -7,8 +7,6 @@
 listDROMAFeatures(
   projects,
   feature_type,
-  data_type = "all",
-  tumor_type = "all",
   connection = NULL,
   limit = NULL,
   pattern = NULL
@@ -18,10 +16,6 @@ listDROMAFeatures(
 \item{projects}{Character, the name of the project (e.g., "gCSI", "CCLE")}
 
 \item{feature_type}{Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")}
-
-\item{data_type}{Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"}
-
-\item{tumor_type}{Character, filter by tumor type: "all" (default) or specific tumor type}
 
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 
@@ -48,12 +42,6 @@ drugs <- listDROMAFeatures("gCSI", "drug")
 
 # List genes matching a pattern
 brca_genes <- listDROMAFeatures("gCSI", "mRNA", pattern = "^BRCA")
-
-# List genes for cell lines only
-cell_line_genes <- listDROMAFeatures("gCSI", "mRNA", data_type = "CellLine")
-
-# List genes for breast cancer samples only
-breast_genes <- listDROMAFeatures("gCSI", "mRNA", tumor_type = "breast cancer")
 
 # List first 100 features
 top_genes <- listDROMAFeatures("gCSI", "mRNA", limit = 100)

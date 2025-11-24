@@ -431,6 +431,7 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
 #' @param show_names_only Logical, if TRUE returns only a character vector of project names
 #' @param projects Character, project name to get specific data types for (default: NULL for all projects)
 #' @param feature_type Character, filter projects by feature type availability (e.g., "mRNA", "cnv", "drug"). When specified, returns only projects that have this feature type available (default: NULL)
+#' @param exclude_clinical Logical, if TRUE excludes projects with dataset_type = "Clinical" (default: FALSE)
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @return A data frame with project information, a character vector of project names, or a character vector of data types
 #' @export
@@ -453,9 +454,12 @@ listDROMADatabaseTables <- function(pattern = NULL, connection = NULL) {
 #'
 #' # Check if a specific project has a specific feature type
 #' has_drug_data <- listDROMAProjects(projects = "gCSI", feature_type = "drug")
+#'
+#' # Exclude Clinical projects
+#' non_clinical_projects <- listDROMAProjects(exclude_clinical = TRUE)
 #' }
 listDROMAProjects <- function(show_names_only = FALSE, projects = NULL, 
-                              feature_type = NULL, connection = NULL) {
+                              feature_type = NULL, exclude_clinical = FALSE, connection = NULL) {
   if (is.null(connection)) {
     if (!exists("droma_db_connection", envir = .GlobalEnv)) {
       stop("No database connection found. Connect first with connectDROMADatabase()")
@@ -463,137 +467,61 @@ listDROMAProjects <- function(show_names_only = FALSE, projects = NULL,
     connection <- get("droma_db_connection", envir = .GlobalEnv)
   }
 
-  # Get all tables in database
-  all_tables <- DBI::dbListTables(connection)
-
   # Check if projects table exists
-  if ("projects" %in% all_tables) {
-    projects_df <- DBI::dbReadTable(connection, "projects")
-    
-    # If user wants data types for a specific project
-    if (!is.null(projects)) {
-      if (projects %in% projects_df$project_name) {
-        project_row <- projects_df[projects_df$project_name == projects, ]
-        # Split the data_types string by comma
-        available_types <- unlist(strsplit(project_row$data_types, ","))
-        
-        # If feature_type is specified, check if it exists for this project
-        if (!is.null(feature_type)) {
-          if (feature_type %in% available_types) {
-            message("Project '", projects, "' has feature type '", feature_type, "'")
-            return(TRUE)
-          } else {
-            message("Project '", projects, "' does not have feature type '", feature_type, "'")
-            message("Available types: ", paste(available_types, collapse = ", "))
-            return(FALSE)
-          }
-        }
-        
-        # Return data types for the project
-        return(available_types)
-      } else {
-        warning("Project '", projects, "' not found")
-        return(character(0))
-      }
-    }
-    
-    # If feature_type is specified, filter projects
-    if (!is.null(feature_type)) {
-      # Find projects that have this feature type
-      projects_with_feature <- projects_df$project_name[
-        sapply(projects_df$data_types, function(types) {
-          feature_type %in% unlist(strsplit(types, ","))
-        })
-      ]
-      
-      if (length(projects_with_feature) == 0) {
-        message("No projects found with feature type '", feature_type, "'")
-        return(character(0))
-      }
-      
-      message("Found ", length(projects_with_feature), " project(s) with feature type '", feature_type, "'")
-      
+  all_tables <- DBI::dbListTables(connection)
+  if (!"projects" %in% all_tables) {
+    stop("Projects table not found in database. Please update the database with updateDROMAProjects()")
+  }
+
+  projects_df <- DBI::dbReadTable(connection, "projects")
+  
+  # Filter out Clinical projects if exclude_clinical is TRUE
+  if (exclude_clinical && "dataset_type" %in% colnames(projects_df)) {
+    projects_df <- projects_df[is.na(projects_df$dataset_type) | projects_df$dataset_type != "Clinical", ]
+    if (nrow(projects_df) == 0) {
+      message("No projects found after excluding Clinical projects")
       if (show_names_only) {
-        return(projects_with_feature)
+        return(character(0))
       }
-      
-      # Return filtered data frame
-      return(projects_df[projects_df$project_name %in% projects_with_feature, ])
+      return(data.frame())
     }
-
-    # If user just wants project names, return them
-    if (show_names_only) {
-      return(projects_df$project_name)
-    }
-
-    return(projects_df)
   }
-
-  # Otherwise, try to infer projects from table names
-  tables <- all_tables
-
-  # Extract project names from table prefixes, excluding backup tables
-  project_names <- unique(sapply(tables, function(t) {
-    parts <- strsplit(t, "_")[[1]]
-    if (length(parts) >= 2 &&
-        !t %in% c("sample_anno", "drug_anno", "projects", "droma_metadata", "search_vectors") &&
-        !grepl("_raw$", t)) {
-      return(parts[1])
-    } else {
-      return(NA)
-    }
-  }))
-  project_names <- project_names[!is.na(project_names)]
-
-  if (length(project_names) == 0) {
-    message("No projects found in database")
-    if (show_names_only) {
-      return(character(0))
-    }
-    return(data.frame())
-  }
-
+  
   # If user wants data types for a specific project
   if (!is.null(projects)) {
-    if (projects %in% project_names) {
-      # Get all tables for this project, excluding backup tables
-      project_tables <- grep(paste0("^", projects, "_"), tables, value = TRUE)
-      # Remove backup tables like "_raw"
-      project_tables <- project_tables[!grepl("_raw$", project_tables)]
-      # Extract data types from table names
-      data_types <- unique(sapply(project_tables, function(t) {
-        sub(paste0("^", projects, "_"), "", t)
-      }))
+    if (projects %in% projects_df$project_name) {
+      project_row <- projects_df[projects_df$project_name == projects, ]
+      # Split the data_types string by comma
+      available_types <- unlist(strsplit(project_row$data_types, ","))
       
-      # If feature_type is specified, check if it exists
+      # If feature_type is specified, check if it exists for this project
       if (!is.null(feature_type)) {
-        if (feature_type %in% data_types) {
+        if (feature_type %in% available_types) {
           message("Project '", projects, "' has feature type '", feature_type, "'")
           return(TRUE)
         } else {
           message("Project '", projects, "' does not have feature type '", feature_type, "'")
-          message("Available types: ", paste(data_types, collapse = ", "))
+          message("Available types: ", paste(available_types, collapse = ", "))
           return(FALSE)
         }
       }
       
-      return(data_types)
+      # Return data types for the project
+      return(available_types)
     } else {
       warning("Project '", projects, "' not found")
       return(character(0))
     }
   }
   
-  # If feature_type is specified, filter projects by checking tables
+  # If feature_type is specified, filter projects
   if (!is.null(feature_type)) {
-    projects_with_feature <- character(0)
-    
-    for (proj in project_names) {
-      table_name <- paste0(proj, "_", feature_type)
-      if (table_name %in% tables) {
-        projects_with_feature <- c(projects_with_feature, proj)
-      }
-    }
+    # Find projects that have this feature type
+    projects_with_feature <- projects_df$project_name[
+      sapply(projects_df$data_types, function(types) {
+        feature_type %in% unlist(strsplit(types, ","))
+      })
+    ]
     
     if (length(projects_with_feature) == 0) {
       message("No projects found with feature type '", feature_type, "'")
@@ -606,26 +534,16 @@ listDROMAProjects <- function(show_names_only = FALSE, projects = NULL,
       return(projects_with_feature)
     }
     
-    # Return data frame with filtered projects
-    result <- data.frame(
-      projects = projects_with_feature,
-      stringsAsFactors = FALSE
-    )
-    return(result)
+    # Return filtered data frame
+    return(projects_df[projects_df$project_name %in% projects_with_feature, ])
   }
 
-  # Return just project names if requested
+  # If user just wants project names, return them
   if (show_names_only) {
-    return(project_names)
+    return(projects_df$project_name)
   }
 
-  # Create a data frame with project information
-  result <- data.frame(
-    projects = project_names,
-    stringsAsFactors = FALSE
-  )
-
-  return(result)
+  return(projects_df)
 }
 
 
@@ -878,8 +796,6 @@ updateDROMAProjects <- function(projects = NULL, dataset_type = NULL, connection
 #' @description Lists all available features (genes, drugs, etc.) for a specific project and data type
 #' @param projects Character, the name of the project (e.g., "gCSI", "CCLE")
 #' @param feature_type Character, the type of data to query (e.g., "mRNA", "cnv", "drug", "mutation_gene")
-#' @param data_type Character, filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
-#' @param tumor_type Character, filter by tumor type: "all" (default) or specific tumor type
 #' @param connection Optional database connection object. If NULL, uses global connection
 #' @param limit Integer, maximum number of features to return (default: NULL for all features)
 #' @param pattern Character, optional regex pattern to filter feature names
@@ -899,16 +815,10 @@ updateDROMAProjects <- function(projects = NULL, dataset_type = NULL, connection
 #' # List genes matching a pattern
 #' brca_genes <- listDROMAFeatures("gCSI", "mRNA", pattern = "^BRCA")
 #'
-#' # List genes for cell lines only
-#' cell_line_genes <- listDROMAFeatures("gCSI", "mRNA", data_type = "CellLine")
-#'
-#' # List genes for breast cancer samples only
-#' breast_genes <- listDROMAFeatures("gCSI", "mRNA", tumor_type = "breast cancer")
-#'
 #' # List first 100 features
 #' top_genes <- listDROMAFeatures("gCSI", "mRNA", limit = 100)
 #' }
-listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_type = "all",
+listDROMAFeatures <- function(projects, feature_type,
                              connection = NULL, limit = NULL, pattern = NULL) {
   if (!requireNamespace("DBI", quietly = TRUE)) {
     stop("Package 'DBI' is required. Please install with install.packages('DBI')")
@@ -930,43 +840,6 @@ listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_t
   if (!table_name %in% all_tables) {
     stop("Table '", table_name, "' not found. Available tables: ",
          paste(grep(paste0("^", projects, "_"), all_tables, value = TRUE), collapse = ", "))
-  }
-
-  # Get filtered sample IDs if data_type or tumor_type filters are specified
-  filtered_samples <- NULL
-  if (data_type != "all" || tumor_type != "all") {
-    # Check if sample_anno table exists
-    if (!"sample_anno" %in% all_tables) {
-      warning("Sample annotation table 'sample_anno' not found. Ignoring data_type and tumor_type filters.")
-    } else {
-      # Construct query for sample filtering
-      sample_query <- "SELECT DISTINCT SampleID FROM sample_anno WHERE ProjectID = ?"
-      sample_params <- list(projects)
-
-      if (data_type != "all") {
-        sample_query <- paste0(sample_query, " AND DataType = ?")
-        sample_params <- append(sample_params, data_type)
-      }
-
-      if (tumor_type != "all") {
-        sample_query <- paste0(sample_query, " AND TumorType = ?")
-        sample_params <- append(sample_params, tumor_type)
-      }
-
-      # Execute the query
-      sample_result <- DBI::dbGetQuery(connection, sample_query, params = sample_params)
-      filtered_samples <- sample_result$SampleID
-
-      if (length(filtered_samples) == 0) {
-        filter_parts <- c()
-        if(data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
-        if(tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
-        filter_desc <- paste0(" with ", paste(filter_parts, collapse = " and "))
-
-        message("No samples found for project '", projects, "'", filter_desc)
-        return(character(0))
-      }
-    }
   }
 
   # Determine the column name based on data type
@@ -992,30 +865,9 @@ listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_t
     }
   }
 
-  # For continuous data types, we need to check which features have data for the filtered samples
-  if (!is.null(filtered_samples) && feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
-    # Get column names from the table to see which samples have data
-    columns_query <- paste0("PRAGMA table_info(", table_name, ")")
-    columns_info <- DBI::dbGetQuery(connection, columns_query)
-    available_columns <- columns_info$name[columns_info$name != "feature_id"]
-
-    # Find intersection of filtered samples and available columns
-    common_samples <- intersect(filtered_samples, available_columns)
-
-    if (length(common_samples) == 0) {
-      message("No data available for the specified sample filters in ", table_name)
-      return(character(0))
-    }
-
-    # For continuous data, we'll get all features since sample filtering is conceptual
-    # (all features exist, but only some samples would be used in analysis)
-    query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
-                    " WHERE ", feature_column, " IS NOT NULL")
-  } else {
-    # Construct query to get distinct features
-    query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
-                    " WHERE ", feature_column, " IS NOT NULL")
-  }
+  # Construct query to get distinct features
+  query <- paste0("SELECT DISTINCT ", feature_column, " FROM ", table_name,
+                  " WHERE ", feature_column, " IS NOT NULL")
 
   # Add pattern filter if specified
   if (!is.null(pattern)) {
@@ -1060,12 +912,7 @@ listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_t
     features <- result[[feature_column]]
 
     if (length(features) == 0) {
-      filter_parts <- c()
-      if (!is.null(pattern)) filter_parts <- c(filter_parts, paste0("pattern='", pattern, "'"))
-      if (data_type != "all") filter_parts <- c(filter_parts, paste0("data_type='", data_type, "'"))
-      if (tumor_type != "all") filter_parts <- c(filter_parts, paste0("tumor_type='", tumor_type, "'"))
-
-      filter_desc <- if(length(filter_parts) > 0) paste0(" with ", paste(filter_parts, collapse = " and ")) else ""
+      filter_desc <- if (!is.null(pattern)) paste0(" with pattern='", pattern, "'") else ""
 
       message("No features found in ", table_name, filter_desc)
       return(character(0))
@@ -1077,15 +924,7 @@ listDROMAFeatures <- function(projects, feature_type, data_type = "all", tumor_t
     total_result <- DBI::dbGetQuery(connection, total_query)
     total_features <- total_result$total
 
-    filter_desc <- ""
-    filters <- c()
-    if (!is.null(pattern)) filters <- c(filters, paste0("pattern='", pattern, "'"))
-    if (data_type != "all") filters <- c(filters, paste0("data_type='", data_type, "'"))
-    if (tumor_type != "all") filters <- c(filters, paste0("tumor_type='", tumor_type, "'"))
-
-    if (length(filters) > 0) {
-      filter_desc <- paste0(" (filtered by ", paste(filters, collapse = " and "), ")")
-    }
+    filter_desc <- if (!is.null(pattern)) paste0(" (filtered by pattern='", pattern, "')") else ""
 
     if (!is.null(limit)) {
       message("Showing first ", length(features), " features out of ", total_features,

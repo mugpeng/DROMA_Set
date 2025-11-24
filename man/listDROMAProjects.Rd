@@ -8,6 +8,7 @@ listDROMAProjects(
   show_names_only = FALSE,
   projects = NULL,
   feature_type = NULL,
+  exclude_clinical = FALSE,
   connection = NULL
 )
 }
@@ -17,6 +18,8 @@ listDROMAProjects(
 \item{projects}{Character, project name to get specific data types for (default: NULL for all projects)}
 
 \item{feature_type}{Character, filter projects by feature type availability (e.g., "mRNA", "cnv", "drug"). When specified, returns only projects that have this feature type available (default: NULL)}
+
+\item{exclude_clinical}{Logical, if TRUE excludes projects with dataset_type = "Clinical" (default: FALSE)}
 
 \item{connection}{Optional database connection object. If NULL, uses global connection}
 }
@@ -45,5 +48,8 @@ projects_with_mRNA <- listDROMAProjects(feature_type = "mRNA", show_names_only =
 
 # Check if a specific project has a specific feature type
 has_drug_data <- listDROMAProjects(projects = "gCSI", feature_type = "drug")
+
+# Exclude Clinical projects
+non_clinical_projects <- listDROMAProjects(exclude_clinical = TRUE)
 }
 }
