@@ -18,7 +18,7 @@ cat("Total tables in database:", nrow(all_tables), "\n")
 project_names <- listDROMAProjects(show_names_only = TRUE)
 
 # Create a DromaSet object for gCSI data
-gCSI <- createDromaSetFromDatabase("gCSI", db_path = "data/droma.sqlite")
+
 
 # load data include drug and molecule
 # gCSI_2 <- createDromaSetFromDatabase("gCSI", "data/droma.sqlite", auto_load = TRUE)

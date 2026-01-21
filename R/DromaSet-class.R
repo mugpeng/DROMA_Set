@@ -810,6 +810,7 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, select_drugs = N
 
   # Construct query
   query <- paste0("SELECT * FROM ", table_name)
+  query_params <- NULL
 
   # Add drug filter if specified
   if (!is.null(select_drugs)) {
@@ -835,12 +836,19 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, select_drugs = N
       }
     }
 
-    drugs_str <- paste0("'", existing_drugs, "'", collapse = ",")
-    query <- paste0(query, " WHERE feature_id IN (", drugs_str, ")")
+    # IMPORTANT: use parameterized query to safely handle drug names
+    # containing quotes (e.g., 4'-Epiadriamycin) and avoid SQL syntax errors.
+    placeholders <- paste(rep("?", length(existing_drugs)), collapse = ",")
+    query <- paste0(query, " WHERE feature_id IN (", placeholders, ")")
+    query_params <- as.list(existing_drugs)
   }
 
   # Execute query
-  data <- DBI::dbGetQuery(con, query)
+  data <- if (!is.null(query_params)) {
+    DBI::dbGetQuery(con, query, params = query_params)
+  } else {
+    DBI::dbGetQuery(con, query)
+  }
 
   # Variable to store the loaded data
   loaded_data <- NULL
