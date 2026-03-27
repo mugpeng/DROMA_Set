@@ -126,12 +126,16 @@ storeMatricesInDatabase <- function(db_path,
 
 #' Retrieve Matrix from SQLite Database
 #'
-#' @description Loads a matrix from SQLite database, reconstructing the original matrix format
-#' with row names from feature_id column.
+#' @description Reads a table from SQLite. If the table has a \code{feature_id} column, rows are
+#' returned as a matrix with those IDs as row names (optional row subset via \code{features}).
+#' Otherwise the full table is returned as a \code{data.frame} and \code{features} is ignored.
 #' @param db_path Path to the SQLite database file
 #' @param table_name Name of the table containing the matrix data
-#' @param features Optional vector of specific feature IDs to retrieve. If NULL, retrieves all
-#' @return Matrix object with feature_id values as row names
+#' @param features Optional vector of specific feature IDs to retrieve. If NULL, retrieves all.
+#'   Ignored when the table has no \code{feature_id} column (full table is returned as a
+#'   \code{data.frame}).
+#' @return If the table has a \code{feature_id} column: a matrix with those values as row
+#'   names. Otherwise: the full table as a \code{data.frame} (\code{features} is not applied).
 #' @export
 #' @examples
 #' \dontrun{
@@ -173,45 +177,50 @@ retrieveMatrixFromDatabase <- function(db_path,
          paste(DBI::dbListTables(con), collapse = ", "))
   }
   
-  # Build query
-  if (is.null(features)) {
-    query <- paste0("SELECT * FROM ", table_name)
+  q_table <- DBI::dbQuoteIdentifier(con, table_name)
+  col_names <- DBI::dbGetQuery(con, paste0("PRAGMA table_info(", q_table, ")"))$name
+  has_feature_id <- "feature_id" %in% col_names
+
+  if (!has_feature_id) {
+    if (!is.null(features)) {
+      message(
+        "Table '", table_name, "' has no feature_id column; ignoring features ",
+        "and returning the full table."
+      )
+    }
+    query <- paste0("SELECT * FROM ", q_table)
+  } else if (is.null(features)) {
+    query <- paste0("SELECT * FROM ", q_table)
   } else {
     if (!is.character(features)) {
       stop("features must be a character vector of feature IDs")
     }
-    # Use parameterized query to prevent SQL injection
     feature_placeholders <- paste0("'", features, "'", collapse = ", ")
-    query <- paste0("SELECT * FROM ", table_name, 
-                   " WHERE feature_id IN (", feature_placeholders, ")")
+    query <- paste0(
+      "SELECT * FROM ", q_table,
+      " WHERE feature_id IN (", feature_placeholders, ")"
+    )
   }
-  
-  # Execute query
+
   tryCatch({
     df <- DBI::dbGetQuery(con, query)
-    
+
     if (nrow(df) == 0) {
       warning("No data retrieved for table '", table_name, "'")
       return(NULL)
     }
-    
-    # Check if feature_id column exists
-    if (!"feature_id" %in% colnames(df)) {
-      stop("Table '", table_name, "' does not have a feature_id column")
+
+    if (!has_feature_id) {
+      message("Retrieved table: ", nrow(df), " rows × ", ncol(df), " columns (data.frame)")
+      return(df)
     }
-    
-    # Convert back to matrix
+
     feature_ids <- df$feature_id
     df$feature_id <- NULL
-    
-    # Convert to matrix
     mat <- as.matrix(df)
     rownames(mat) <- feature_ids
-    
     message("Retrieved matrix: ", nrow(mat), " features × ", ncol(mat), " samples")
-    
-    return(mat)
-    
+    mat
   }, error = function(e) {
     stop("Failed to retrieve matrix from table '", table_name, "': ", e$message)
   })

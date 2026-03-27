@@ -11,14 +11,18 @@ retrieveMatrixFromDatabase(db_path, table_name, features = NULL)
 
 \item{table_name}{Name of the table containing the matrix data}
 
-\item{features}{Optional vector of specific feature IDs to retrieve. If NULL, retrieves all}
+\item{features}{Optional vector of specific feature IDs to retrieve. If NULL, retrieves all.
+Ignored when the table has no \code{feature_id} column (full table is returned as a
+\code{data.frame}).}
 }
 \value{
-Matrix object with feature_id values as row names
+If the table has a \code{feature_id} column: a matrix with those values as row
+  names. Otherwise: the full table as a \code{data.frame} (\code{features} is not applied).
 }
 \description{
-Loads a matrix from SQLite database, reconstructing the original matrix format
-with row names from feature_id column.
+Reads a table from SQLite. If the table has a \code{feature_id} column, rows are
+returned as a matrix with those IDs as row names (optional row subset via \code{features}).
+Otherwise the full table is returned as a \code{data.frame} and \code{features} is ignored.
 }
 \examples{
 \dontrun{
