@@ -16,7 +16,10 @@ getFeatureFromDatabase(
 \arguments{
 \item{feature_type}{The type of feature to select (e.g., "mRNA", "cnv", "drug")}
 
-\item{select_features}{The specific feature to select within the feature type (default: "all" to select entire table)}
+\item{select_features}{\code{"all"} for full table(s). For continuous omics types
+(\code{mRNA}, \code{cnv}, \code{meth}, etc.): one ID returns a named numeric vector across
+samples; multiple IDs return a feature \eqn{\times} sample matrix with \code{feature_id} rows.
+For discrete types (e.g. mutations), only \code{"all"} or a single feature is supported.}
 
 \item{projects}{Vector of projects to select from (e.g., c("CCLE", "GDSC"))}
 
@@ -30,7 +33,8 @@ getFeatureFromDatabase(
 A list of selected features from specified projects
 }
 \description{
-Fetches specific feature data from the DROMA database based on selection criteria
+Fetches feature data from the DROMA database using project / sample filters and
+optional feature ID selection.
 }
 \note{
 This function is provided for backward compatibility. For new code, consider

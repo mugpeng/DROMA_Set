@@ -31,6 +31,168 @@ connectDROMADatabase <- function(db_path = file.path(path.expand("sql_db"), "dro
   return(con)
 }
 
+#' Store Matrix in SQLite Database
+#'
+#' @description Writes a matrix or data.frame to a SQLite file with \code{feature_id} column and index.
+#' Useful for stand-alone databases (path-based) without a live DROMA connection.
+#' @param db_path Path where the SQLite database file should be created or updated
+#' @param matrix Matrix or data.frame to store
+#' @param table_name Name of the table to create in database
+#' @return Invisibly returns the path to the database
+#' @export
+#' @examples
+#' \dontrun{
+#' exp_matrix <- matrix(rnorm(1000), nrow = 100, ncol = 10)
+#' rownames(exp_matrix) <- paste0("Gene_", 1:100)
+#' colnames(exp_matrix) <- paste0("Sample_", 1:10)
+#' storeMatricesInDatabase(
+#'   db_path = "expression_data.sqlite",
+#'   matrix = exp_matrix,
+#'   table_name = "expression"
+#' )
+#' }
+storeMatricesInDatabase <- function(db_path,
+                                  matrix,
+                                  table_name) {
+  if (!requireNamespace("RSQLite", quietly = TRUE) ||
+      !requireNamespace("DBI", quietly = TRUE)) {
+    stop("Packages 'RSQLite' and 'DBI' are required. Install with: install.packages(c('RSQLite', 'DBI'))")
+  }
+
+  if (missing(db_path) || !is.character(db_path) || length(db_path) != 1) {
+    stop("db_path must be a single character string specifying the database file path")
+  }
+
+  if (missing(matrix)) {
+    stop("matrix is required and must be a matrix or data.frame")
+  }
+
+  if (!is.matrix(matrix) && !is.data.frame(matrix)) {
+    stop("matrix must be a matrix or data.frame")
+  }
+
+  if (missing(table_name) || !is.character(table_name) || length(table_name) != 1) {
+    stop("table_name must be a single character string")
+  }
+
+  if (grepl("^[0-9]|[^a-zA-Z0-9_]", table_name)) {
+    stop("Invalid table name '", table_name,
+         "'. Table names must start with letter/underscore and contain only letters, numbers, underscores")
+  }
+
+  db_dir <- dirname(db_path)
+  if (!dir.exists(db_dir)) {
+    dir.create(db_dir, recursive = TRUE)
+    message("Created directory: ", db_dir)
+  }
+
+  message("Connecting to database: ", db_path)
+  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+  message("Processing matrix: ", table_name)
+
+  if (is.null(rownames(matrix))) {
+    rownames(matrix) <- paste0("feature_", seq_len(nrow(matrix)))
+    warning("Matrix has no row names. Generated generic names.")
+  }
+
+  if (is.null(colnames(matrix))) {
+    colnames(matrix) <- paste0("sample_", seq_len(ncol(matrix)))
+    warning("Matrix has no column names. Generated generic names.")
+  }
+
+  tryCatch({
+    df <- as.data.frame(matrix, stringsAsFactors = FALSE)
+    df$feature_id <- rownames(matrix)
+    df <- df[, c("feature_id", setdiff(names(df), "feature_id"))]
+
+    n_features <- nrow(df)
+    n_samples <- ncol(df) - 1
+
+    DBI::dbWriteTable(con, table_name, df, overwrite = TRUE)
+
+    index_name <- paste0("idx_", table_name, "_feature_id")
+    index_sql <- paste0(
+      "CREATE INDEX IF NOT EXISTS ", index_name,
+      " ON ", table_name, " (feature_id)"
+    )
+    DBI::dbExecute(con, index_sql)
+
+    message("Stored ", n_features, " features × ", n_samples,
+            " samples with feature_id index")
+  }, error = function(e) {
+    stop("Failed to process matrix '", table_name, "': ", e$message)
+  })
+
+  message("Database storage complete. Table '", table_name, "' created.")
+  invisible(db_path)
+}
+
+#' List Matrix Tables in Database
+#'
+#' @description Lists tables in a SQLite file and summarizes dimensions when \code{matrix_metadata}
+#' is absent. Path-based; does not use the DROMA global connection.
+#' @param db_path Path to the SQLite database file
+#' @return Data frame with table names (and dimensions when inferred)
+#' @export
+#' @examples
+#' \dontrun{
+#' listMatrixTables("expression_data.sqlite")
+#' }
+listMatrixTables <- function(db_path) {
+  if (!requireNamespace("RSQLite", quietly = TRUE) ||
+      !requireNamespace("DBI", quietly = TRUE)) {
+    stop("Packages 'RSQLite' and 'DBI' are required. Install with: install.packages(c('RSQLite', 'DBI'))")
+  }
+
+  if (!file.exists(db_path)) {
+    stop("Database file does not exist: ", db_path)
+  }
+
+  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+  all_tables <- DBI::dbListTables(con)
+
+  if (length(all_tables) == 0) {
+    message("No tables found in database")
+    return(data.frame())
+  }
+
+  if ("matrix_metadata" %in% all_tables) {
+    return(DBI::dbGetQuery(con, "SELECT * FROM matrix_metadata"))
+  }
+
+  matrix_tables <- setdiff(all_tables, c("matrix_metadata", "sqlite_sequence"))
+
+  if (length(matrix_tables) == 0) {
+    message("No matrix tables found in database")
+    return(data.frame())
+  }
+
+  metadata <- data.frame(
+    table_name = matrix_tables,
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(nrow(metadata))) {
+    table_name <- metadata$table_name[i]
+    tryCatch({
+      count_query <- paste0("SELECT COUNT(*) FROM ", DBI::dbQuoteIdentifier(con, table_name))
+      metadata$n_features[i] <- DBI::dbGetQuery(con, count_query)[1L, 1L]
+      cols_query <- paste0("PRAGMA table_info(", DBI::dbQuoteIdentifier(con, table_name), ")")
+      col_info <- DBI::dbGetQuery(con, cols_query)
+      metadata$n_samples[i] <- nrow(col_info) - 1L
+    }, error = function(e) {
+      metadata$n_features[i] <- NA_real_
+      metadata$n_samples[i] <- NA_real_
+    })
+  }
+
+  metadata
+}
+
 #' Update DROMA Database with New Object
 #'
 #' @description Adds or updates a table in the DROMA database with a new object
@@ -124,9 +286,13 @@ updateDROMADatabase <- function(obj, table_name, overwrite = FALSE, connection =
 
 #' Retrieve Feature Data from DROMA Database
 #'
-#' @description Fetches specific feature data from the DROMA database based on selection criteria
+#' @description Fetches feature data from the DROMA database using project / sample filters and
+#' optional feature ID selection.
 #' @param feature_type The type of feature to select (e.g., "mRNA", "cnv", "drug")
-#' @param select_features The specific feature to select within the feature type (default: "all" to select entire table)
+#' @param select_features \code{"all"} for full table(s). For continuous omics types
+#'   (\code{mRNA}, \code{cnv}, \code{meth}, etc.): one ID returns a named numeric vector across
+#'   samples; multiple IDs return a feature \eqn{\times} sample matrix with \code{feature_id} rows.
+#'   For discrete types (e.g. mutations), only \code{"all"} or a single feature is supported.
 #' @param projects Vector of projects to select from (e.g., c("CCLE", "GDSC"))
 #' @param data_type Filter by data type: "all" (default), "CellLine", "PDO", "PDC", or "PDX"
 #' @param tumor_type Filter by tumor type: "all" (default) or specific tumor type
@@ -149,6 +315,23 @@ getFeatureFromDatabase <- function(feature_type, select_features = "all",
       stop("No database connection found. Connect first with connectDROMADatabase()")
     }
     connection <- get("droma_db_connection", envir = .GlobalEnv)
+  }
+
+  select_all <- identical(select_features, "all")
+  if (!select_all) {
+    if (!is.character(select_features)) {
+      stop("select_features must be character or \"all\"")
+    }
+    if (length(select_features) < 1L) {
+      stop("select_features cannot be an empty character vector")
+    }
+    if (length(select_features) > 1L &&
+        !feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
+      stop(
+        "Multiple select_features is only supported for continuous omics types (mRNA, cnv, meth, ...).",
+        call. = FALSE
+      )
+    }
   }
 
   # Get data source tables that match the feature type
@@ -196,100 +379,124 @@ getFeatureFromDatabase <- function(feature_type, select_features = "all",
   result_list <- list()
 
   for (table in feature_tables) {
-    # Extract data source name from table name
     data_source <- sub(paste0("_", feature_type, "$"), "", table)
+    qtbl <- DBI::dbQuoteIdentifier(connection, table)
 
-    # Query for the specified feature or entire table
     if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
-      # For continuous data
-      if (select_features == "all") {
-        # Get entire table
-        query <- paste0("SELECT * FROM ", table)
+      if (select_all) {
+        query <- paste0("SELECT * FROM ", qtbl)
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
-          next  # Skip if table is empty
+          next
         }
 
-        # Convert to matrix format (excluding feature_id column)
         feature_id_col <- which(names(feature_data) == "feature_id")
         if (length(feature_id_col) > 0) {
-          feature_matrix <- as.matrix(feature_data[, -feature_id_col])
+          feature_matrix <- as.matrix(feature_data[, -feature_id_col, drop = FALSE])
           rownames(feature_matrix) <- feature_data$feature_id
           feature_vector <- feature_matrix
         } else {
           feature_vector <- as.matrix(feature_data)
         }
-      } else {
-        # Get the row for the specific feature
-        query <- paste0("SELECT * FROM ", table, " WHERE feature_id = '", select_features, "'")
+      } else if (length(select_features) == 1L) {
+        query <- paste0(
+          "SELECT * FROM ", qtbl,
+          " WHERE feature_id = ", DBI::dbQuoteString(connection, select_features[1])
+        )
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
-          next  # Skip if feature not found
+          next
         }
 
-        # Convert to vector format (excluding feature_id column)
-        feature_vector <- as.numeric(as.vector(feature_data[1, -which(names(feature_data) == "feature_id")]))
-        names(feature_vector) <- colnames(feature_data)[-which(names(feature_data) == "feature_id")]
-      }
-    } else {
-      # For discrete data like mutations
-      if (select_features == "all") {
-        # Get entire table
-        query <- paste0("SELECT * FROM ", table)
+        fid_col <- which(names(feature_data) == "feature_id")
+        feature_vector <- as.numeric(as.vector(feature_data[1, -fid_col, drop = FALSE]))
+        names(feature_vector) <- colnames(feature_data)[-fid_col]
+      } else {
+        feats <- unique(select_features)
+        if (length(feats) < length(select_features)) {
+          warning("Duplicate feature IDs in select_features were deduplicated", immediate. = TRUE)
+        }
+        in_list <- paste(DBI::dbQuoteString(connection, feats), collapse = ", ")
+        query <- paste0("SELECT * FROM ", qtbl, " WHERE feature_id IN (", in_list, ")")
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
-          next  # Skip if table is empty
+          next
+        }
+
+        fid_col <- which(names(feature_data) == "feature_id")
+        feature_matrix <- as.matrix(feature_data[, -fid_col, drop = FALSE])
+        rownames(feature_matrix) <- feature_data$feature_id
+        ord <- match(feats, rownames(feature_matrix))
+        if (anyNA(ord)) {
+          warning(
+            "Features not found in ", table, ": ",
+            paste(feats[is.na(ord)], collapse = ", "),
+            immediate. = TRUE
+          )
+        }
+        ord <- ord[!is.na(ord)]
+        if (length(ord) == 0) {
+          next
+        }
+        feature_vector <- feature_matrix[ord, , drop = FALSE]
+      }
+    } else {
+      if (select_all) {
+        query <- paste0("SELECT * FROM ", qtbl)
+        feature_data <- DBI::dbGetQuery(connection, query)
+
+        if (nrow(feature_data) == 0) {
+          next
         }
 
         feature_vector <- feature_data
       } else {
-        # Get sample IDs where specific feature is present
-        query <- paste0("SELECT samples FROM ", table, " WHERE gene = '", select_features, "'")
+        query <- paste0(
+          "SELECT samples FROM ", qtbl,
+          " WHERE gene = ", DBI::dbQuoteString(connection, select_features[1])
+        )
         feature_data <- DBI::dbGetQuery(connection, query)
 
         if (nrow(feature_data) == 0) {
-          next  # Skip if feature not found
+          next
         }
 
         feature_vector <- feature_data$samples
       }
     }
 
-    # Filter by samples if needed
     if (!is.null(filtered_samples)) {
       if (feature_type %in% c("mRNA", "cnv", "meth", "proteinrppa", "proteinms", "drug", "drug_raw")) {
-        if (select_features == "all") {
-          # For matrices (all features)
+        if (select_all || is.matrix(feature_vector)) {
           common_samples <- intersect(colnames(feature_vector), filtered_samples)
           if (length(common_samples) == 0) {
-            next  # Skip if no samples match the filter
+            next
           }
           feature_vector <- feature_vector[, common_samples, drop = FALSE]
         } else {
-          # For vectors (single feature)
           common_samples <- intersect(names(feature_vector), filtered_samples)
           if (length(common_samples) == 0) {
-            next  # Skip if no samples match the filter
+            next
           }
           feature_vector <- feature_vector[common_samples]
         }
       } else {
         feature_vector <- intersect(feature_vector, filtered_samples)
         if (length(feature_vector) == 0) {
-          next  # Skip if no samples match the filter
+          next
         }
       }
     }
 
-    # Add to result list
     result_list[[data_source]] <- feature_vector
   }
 
   if (length(result_list) == 0) {
-    stop("No data found for feature '", select_features, "' with the specified criteria")
+    lab <- if (select_all) "all" else paste(select_features, collapse = ", ")
+    stop("No data found for feature(s) '", lab, "' with the specified criteria")
   }
 
   return(result_list)

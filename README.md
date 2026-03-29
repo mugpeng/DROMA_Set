@@ -217,21 +217,26 @@ multi_all <- createMultiDromaSetFromAllProjects("droma.sqlite",
                                                exclude_projects = "test_data")
 ```
 
-### 2. CTRDB SQL Manager (CTRDB_SQLManager.R)
+### 2. Path-based SQLite matrices (DROMA_SQLManager.R)
+
+Table names should follow `{project}_{feature_type}` (e.g. `experiment1_mRNA`) so
+`getFeatureFromDatabase()` can discover them.
 
 ```r
-# Store matrix data directly in database
+# Store matrix data in a SQLite file
 storeMatricesInDatabase("my_database.sqlite", expression_matrix, "experiment1_mRNA")
 
-# Retrieve matrix data
-retrieved_matrix <- retrieveMatrixFromDatabase("my_database.sqlite", "experiment1_mRNA")
-
-# Retrieve specific features only
-subset_matrix <- retrieveMatrixFromDatabase("my_database.sqlite", "experiment1_mRNA",
-                                          features = c("BRCA1", "TP53", "EGFR"))
-
-# List all matrix tables in database
+# List tables and inferred dimensions
 matrix_tables <- listMatrixTables("my_database.sqlite")
+
+# Read back via the same API as the main DROMA database
+connectDROMADatabase("my_database.sqlite")
+retrieved_list <- getFeatureFromDatabase("mRNA", "all", projects = "experiment1")
+subset_list <- getFeatureFromDatabase(
+  "mRNA", c("BRCA1", "TP53", "EGFR"), projects = "experiment1"
+)
+# retrieved_list$experiment1 and subset_list$experiment1 are matrices (subset is row-filtered)
+closeDROMADatabase()
 ```
 
 ### 3. Load All Molecular Profiles
@@ -380,10 +385,12 @@ The DROMA database uses a standardized table naming convention:
 - `checkDROMASampleNames()`: Check and harmonize sample names
 - `checkDROMADrugNames()`: Check and harmonize drug names
 
-### CTRDB SQL Manager (CTRDB_SQLManager.R)
-- `storeMatricesInDatabase()`: Store matrix data in SQLite database
-- `retrieveMatrixFromDatabase()`: Retrieve matrix data from database
+### SQLite matrix utilities (DROMA_SQLManager.R)
+- `storeMatricesInDatabase()`: Store matrix data in a SQLite file by path
 - `listMatrixTables()`: List matrix tables with metadata
+- `getFeatureFromDatabase()`: Retrieve full tables or multiple `feature_id` rows (continuous omics)
+
+### CTRDB SQL Manager (CTRDB_SQLManager.R)
 - `getPatientExpressionData()`: Retrieve patient expression data from CTRDB
 - `connectCTRDatabase()`: Connect to CTRDB database
 - `closeCTRDatabase()`: Close CTRDB database connection
