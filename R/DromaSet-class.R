@@ -371,14 +371,14 @@ setMethod("loadMolecularProfiles", "DromaSet", function(object, feature_type, se
       filtered_samples <- object@sampleMetadata$SampleID
 
       if (data_type != "all") {
-        filtered_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$DataType == data_type]
+        filtered_samples <- object@sampleMetadata$SampleID[which(object@sampleMetadata$DataType == data_type)]
         if (length(filtered_samples) == 0) {
           return(empty_result(feature_type, return_data, object))
         }
       }
 
       if (tumor_type != "all") {
-        tumor_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$TumorType == tumor_type]
+        tumor_samples <- object@sampleMetadata$SampleID[which(object@sampleMetadata$TumorType == tumor_type)]
         if (length(tumor_samples) == 0) {
           return(empty_result(feature_type, return_data, object))
         }
@@ -764,7 +764,7 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, select_drugs = N
       filtered_samples <- object@sampleMetadata$SampleID
 
       if (data_type != "all") {
-        filtered_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$DataType == data_type]
+        filtered_samples <- object@sampleMetadata$SampleID[which(object@sampleMetadata$DataType == data_type)]
         if (length(filtered_samples) == 0) {
           warning("No samples match the specified data_type: ", data_type)
           if (return_data) {
@@ -777,7 +777,7 @@ setMethod("loadTreatmentResponse", "DromaSet", function(object, select_drugs = N
       }
 
       if (tumor_type != "all") {
-        tumor_samples <- object@sampleMetadata$SampleID[object@sampleMetadata$TumorType == tumor_type]
+        tumor_samples <- object@sampleMetadata$SampleID[which(object@sampleMetadata$TumorType == tumor_type)]
         if (length(tumor_samples) == 0) {
           warning("No samples match the specified tumor_type: ", tumor_type)
           if (return_data) {
