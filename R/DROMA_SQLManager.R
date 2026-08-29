@@ -454,9 +454,11 @@ getFeatureFromDatabase <- function(feature_type, select_features = "all",
 
         feature_vector <- feature_data
       } else {
+        # Discrete tables (mutation/fusion) store sample ids in `samples` and
+        # feature ids in `features` (per droma.sqlite schema)
         query <- paste0(
           "SELECT samples FROM ", qtbl,
-          " WHERE gene = ", DBI::dbQuoteString(connection, select_features[1])
+          " WHERE features = ", DBI::dbQuoteString(connection, select_features[1])
         )
         feature_data <- DBI::dbGetQuery(connection, query)
 

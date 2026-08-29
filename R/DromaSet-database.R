@@ -86,12 +86,16 @@ createDromaSetFromDatabase <- function(projects, db_path = file.path(path.expand
       sample_ids <- unique(sample_ids)
 
       if (length(sample_ids) > 0) {
-        # Construct query to get sample metadata for these samples
-        sample_ids_str <- paste0("'", sample_ids, "'", collapse = ",")
-        sample_query <- paste0("SELECT * FROM sample_anno WHERE SampleID IN (", sample_ids_str, ")")
+        # Parameterized query: sample ids may contain characters that break
+        # string-built IN lists
+        placeholders <- paste(rep("?", length(sample_ids)), collapse = ",")
+        sample_query <- paste0(
+          "SELECT * FROM sample_anno WHERE SampleID IN (", placeholders, ")"
+        )
 
         tryCatch({
-          sample_metadata <- DBI::dbGetQuery(con, sample_query)
+          sample_metadata <- DBI::dbGetQuery(con, sample_query,
+                                             params = as.list(sample_ids))
           # Filter by project if ProjectID column exists
           if ("ProjectID" %in% colnames(sample_metadata)) {
             sample_metadata <- sample_metadata[sample_metadata$ProjectID %in% projects, ]
